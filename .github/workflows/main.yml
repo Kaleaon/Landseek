@@ -127,6 +127,10 @@ jobs:
           autoconf \
           automake \
           libtool \
+          libtool-bin \
+          libltdl-dev \
+          pkg-config \
+          m4 \
           cmake \
           unzip \
           ccache

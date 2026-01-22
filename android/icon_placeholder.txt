@@ -1,0 +1,10 @@
+Android app icons should be placed here:
+- icon.png (512x512) - Main app icon
+- icon_foreground.png (432x432) - Adaptive icon foreground
+- presplash.png (1920x1080) - Loading splash screen
+
+Generate these with any image editor or use:
+- Android Asset Studio: https://romannurik.github.io/AndroidAssetStudio/
+- Figma or similar design tools
+
+For now, the build will use default Kivy icons.

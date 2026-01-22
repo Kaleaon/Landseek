@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from rlm import RLM
 from tools import tool_registry, parse_tool_call, get_tools_description, ToolResult
+from addons import addon_manager, get_addon_manager
 
 
 # Supported document types
@@ -140,16 +141,18 @@ class AIChatRoom:
     - Multi-AI conversations
     - Document upload and processing
     - Tool use capabilities
+    - Add-on/plugin support
     - Optimized for local execution on Pixel 10 Pro with Gemma models
     """
     
-    def __init__(self, name: str = "AI Chat Room", enable_tools: bool = True):
+    def __init__(self, name: str = "AI Chat Room", enable_tools: bool = True, enable_addons: bool = True):
         """
         Initialize the chat room.
         
         Args:
             name: Name of the chat room
             enable_tools: Whether to enable AI tool use
+            enable_addons: Whether to enable add-ons
         """
         self.name = name
         self.messages: List[ChatMessage] = []
@@ -158,6 +161,14 @@ class AIChatRoom:
         self.active_document: Optional[str] = None  # Currently selected document
         self.context_window_size = 10  # Number of messages to include in context
         self.enable_tools = enable_tools  # Enable tool use
+        self.enable_addons = enable_addons  # Enable add-ons
+        self.addon_manager = get_addon_manager() if enable_addons else None
+        
+        # Load add-ons
+        if self.addon_manager:
+            count = self.addon_manager.load_all()
+            if count > 0:
+                self._add_system_message(f"Loaded {count} add-on(s)")
         
     def add_participant(self, participant: AIParticipant) -> None:
         """
@@ -533,6 +544,7 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
     print("  /ask <ai> <question>   - Ask a specific AI a question")
     print("  /tools             - List available tools")
     print("  /tool <name> [args]    - Execute a tool directly")
+    print("  /addons            - List and manage add-ons")
     print("  Type anything else to send a message")
     print(f"{'='*60}\n")
     
@@ -557,6 +569,24 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
             
             if user_input.lower() == "/tools":
                 print(get_tools_description())
+                continue
+            
+            if user_input.lower() == "/addons":
+                if chat_room.addon_manager:
+                    addons = chat_room.addon_manager.list_addons()
+                    if not addons:
+                        print("\n📦 No add-ons installed.")
+                        print("   Add add-ons to the src/addons directory.")
+                    else:
+                        print("\n📦 Installed Add-ons:")
+                        for addon in addons:
+                            status = "✅" if addon.get("loaded") else "⏸️"
+                            enabled = "enabled" if addon.get("enabled") else "disabled"
+                            print(f"   {status} {addon['name']} v{addon['version']} ({enabled})")
+                            print(f"      {addon['description'][:50]}...")
+                    print()
+                else:
+                    print("Add-on system not enabled.")
                 continue
             
             if user_input.lower().startswith("/tool"):

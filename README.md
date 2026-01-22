@@ -6,7 +6,8 @@ A conversational AI chat room application powered by [Recursive Language Models 
 
 - 🎭 **Multi-AI Participants**: Chat room with multiple AI personalities
 - 🚀 **Gemma 3 4B Powered**: Optimized for Google Pixel TPU acceleration
-- 📱 **Pixel TPU Optimized**: Leverages on-device TPU for fast local inference
+- 📱 **Android App**: Native Android application with Kivy
+- 📦 **Add-on System**: Extensible plugin architecture for custom functionality
 - 🔧 **Tool Use**: AI can use built-in tools (calculator, file ops, text analysis, etc.)
 - 📄 **Document Processing**: Upload and analyze documents with AI
 - 🔄 **Recursive Context**: Uses RLM for intelligent context processing
@@ -301,18 +302,128 @@ model="claude-sonnet-4"
 
 ```
 AI Chat Room
-├── chat_room.py          # Main application
-├── src/rlm/              # RLM library
-│   ├── core.py          # Core RLM logic
-│   ├── parser.py        # Response parsing
-│   ├── prompts.py       # System prompts
-│   ├── repl.py          # Safe code execution
-│   └── types.py         # Type definitions
+├── chat_room.py          # Main terminal application
+├── android/              # Android app (Kivy)
+│   └── main.py          # Kivy Android entry point
+├── src/
+│   ├── rlm/              # RLM library
+│   │   ├── core.py      # Core RLM logic
+│   │   ├── parser.py    # Response parsing
+│   │   ├── prompts.py   # System prompts
+│   │   ├── repl.py      # Safe code execution
+│   │   └── types.py     # Type definitions
+│   ├── tools.py          # Built-in tools
+│   └── addons/           # Add-on system
+│       ├── __init__.py  # Add-on manager
+│       └── sample_addon/ # Example add-on
 ├── tests/               # Test suite
-├── examples/            # Usage examples
+├── buildozer.spec       # Android build config
 ├── pyproject.toml       # Package configuration
 └── .env.example         # Environment template
 ```
+
+## Android App
+
+### Building the APK
+
+The Android app is built using Kivy and Buildozer:
+
+```bash
+# Install Buildozer
+pip install buildozer
+
+# Install Android SDK dependencies (Linux/macOS)
+buildozer android debug
+
+# The APK will be in the bin/ directory
+```
+
+### Features
+- Native Android UI with Material Design
+- Chat with multiple AI personalities
+- Document upload and analysis
+- Add-on management
+- Settings for model configuration
+
+## Add-on System
+
+The AI Chat Room supports add-ons (plugins) for extending functionality.
+
+### Installing Add-ons
+
+Place add-ons in the `src/addons/` directory. Each add-on needs:
+- A directory with the add-on ID
+- `manifest.json` with metadata
+- `__init__.py` with the add-on class
+
+### Creating an Add-on
+
+1. Create a new directory in `src/addons/`:
+
+```bash
+mkdir -p src/addons/my_addon
+```
+
+2. Create `manifest.json`:
+
+```json
+{
+    "id": "my_addon",
+    "name": "My Add-on",
+    "version": "1.0.0",
+    "description": "A custom add-on",
+    "author": "Your Name",
+    "permissions": ["tools"]
+}
+```
+
+3. Create `__init__.py`:
+
+```python
+from addons import AddonBase, AddonMetadata
+
+class MyAddon(AddonBase):
+    def on_load(self) -> bool:
+        print("My add-on loaded!")
+        return True
+    
+    def on_unload(self) -> bool:
+        return True
+    
+    def get_tools(self):
+        return [
+            {
+                "name": "my_tool",
+                "description": "Does something cool",
+                "parameters": {},
+                "function": self._my_tool,
+                "category": "custom"
+            }
+        ]
+    
+    def _my_tool(self):
+        return {"success": True, "output": "Hello from my add-on!"}
+```
+
+### Add-on Capabilities
+
+Add-ons can provide:
+- **Custom Tools**: New tools for AI to use
+- **AI Personalities**: New AI characters
+- **Chat Commands**: Custom `/` commands
+- **Message Hooks**: Process messages and responses
+
+### Managing Add-ons
+
+In the terminal app:
+```
+/addons  # List installed add-ons
+```
+
+In the Android app:
+- Tap the 📦 button to open the add-ons manager
+- Toggle add-ons on/off
+- View add-on details
 
 ## How It Works
 
@@ -320,6 +431,7 @@ AI Chat Room
 2. **RLM Context**: Uses Recursive Language Models for efficient context handling
 3. **Safe Execution**: RestrictedPython for secure code execution
 4. **Async Design**: Efficient async/await pattern for responsive chat
+5. **Add-on Architecture**: Modular plugin system for extensibility
 
 ## Development
 

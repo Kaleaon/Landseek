@@ -36,7 +36,7 @@ version = 1.0.0
 
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
-requirements = python3,kivy==2.2.1,pillow,requests,aiohttp,websockets,cryptography,pydantic
+requirements = python3,kivy==2.3.0,pillow,requests,aiohttp,websockets,cryptography,pydantic
 
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
@@ -63,7 +63,7 @@ orientation = portrait
 osx.python_version = 3
 
 # (str) osox.kivy_version
-osx.kivy_version = 2.2.1
+osx.kivy_version = 2.3.0
 
 #
 # Android specific
@@ -338,7 +338,7 @@ ios.codesign.release = "iPhone Distribution: <your name here>"
 #
 
 # (str) Kivy version to use
-#kivy.version = 2.2.1
+#kivy.version = 2.3.0
 
 # (str) Kivy URL to use for checkout
 #kivy.url =

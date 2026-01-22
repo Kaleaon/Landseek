@@ -87,6 +87,15 @@ except ImportError:
     BUILTIN_PERSONALITIES = []
     PersonalityDefinition = None
 
+try:
+    from model_manager import get_model_manager, MODEL_CATALOG, ModelInfo, ModelSize
+except ImportError:
+    def get_model_manager():
+        return None
+    MODEL_CATALOG = {}
+    ModelInfo = None
+    ModelSize = None
+
 # Color scheme
 COLORS = {
     'primary': '#6200EE',
@@ -1007,6 +1016,115 @@ KV = '''
                 padding: dp(12)
                 spacing: dp(8)
 
+<ModelsScreen>:
+    name: 'models'
+    
+    BoxLayout:
+        orientation: 'vertical'
+        
+        # Header
+        BoxLayout:
+            size_hint_y: None
+            height: dp(56)
+            padding: dp(8)
+            spacing: dp(8)
+            
+            canvas.before:
+                Color:
+                    rgba: utils.get_color_from_hex('#1E1E1E')
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            
+            IconButton:
+                text: '←'
+                on_release: app.go_to_chat()
+            
+            Label:
+                text: 'AI Models'
+                font_size: sp(18)
+                bold: True
+                halign: 'left'
+                text_size: self.size
+            
+            IconButton:
+                text: '🔄'
+                on_release: app.refresh_models()
+        
+        # Tab bar for Available/Installed
+        BoxLayout:
+            size_hint_y: None
+            height: dp(48)
+            
+            canvas.before:
+                Color:
+                    rgba: utils.get_color_from_hex('#1E1E1E')
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            
+            ToggleButton:
+                id: available_tab
+                text: 'Available'
+                group: 'models_tabs'
+                state: 'down'
+                background_color: 0, 0, 0, 0
+                background_normal: ''
+                on_state: app.switch_models_tab('available') if self.state == 'down' else None
+            
+            ToggleButton:
+                id: installed_tab
+                text: 'Installed'
+                group: 'models_tabs'
+                background_color: 0, 0, 0, 0
+                background_normal: ''
+                on_state: app.switch_models_tab('installed') if self.state == 'down' else None
+            
+            ToggleButton:
+                id: recommended_tab
+                text: 'Recommended'
+                group: 'models_tabs'
+                background_color: 0, 0, 0, 0
+                background_normal: ''
+                on_state: app.switch_models_tab('recommended') if self.state == 'down' else None
+        
+        # Storage info bar
+        BoxLayout:
+            size_hint_y: None
+            height: dp(36)
+            padding: dp(12), dp(4)
+            
+            canvas.before:
+                Color:
+                    rgba: utils.get_color_from_hex('#2D2D2D')
+                Rectangle:
+                    pos: self.pos
+                    size: self.size
+            
+            Label:
+                id: storage_info
+                text: '0 models installed • 0 MB used'
+                font_size: sp(11)
+                color: 0.6, 0.6, 0.6, 1
+                halign: 'left'
+                text_size: self.size
+        
+        ScrollView:
+            BoxLayout:
+                id: models_list
+                orientation: 'vertical'
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(12)
+                spacing: dp(8)
+        
+        # Import model button
+        RoundedButton:
+            text: '📥 Import Local Model'
+            size_hint_y: None
+            height: dp(48)
+            on_release: app.import_local_model()
+
 <SideDrawer>:
     size_hint_x: None
     width: dp(280)
@@ -1093,6 +1211,11 @@ KV = '''
             icon: '📦'
             text: 'Add-ons'
             on_release: app.nav_to('addons')
+        
+        DrawerItem:
+            icon: '🧠'
+            text: 'AI Models'
+            on_release: app.nav_to('models')
         
         DrawerItem:
             icon: '⚙️'
@@ -1240,6 +1363,11 @@ class AddonsScreen(Screen):
     pass
 
 
+class ModelsScreen(Screen):
+    """AI Models download and management screen."""
+    pass
+
+
 # ============================================
 # Main Application
 # ============================================
@@ -1261,6 +1389,7 @@ class AIChatRoomApp(App):
         # State management
         self.state_manager = get_state_manager()
         self.addon_manager = get_addon_manager()
+        self.model_manager = get_model_manager()
         
         # AI participants
         self.ai_participants: Dict[str, Dict] = {}
@@ -1326,6 +1455,7 @@ class AIChatRoomApp(App):
         self.sm.add_widget(DocumentsScreen())
         self.sm.add_widget(ToolsScreen())
         self.sm.add_widget(AddonsScreen())
+        self.sm.add_widget(ModelsScreen())
         
         self.root_layout.add_widget(self.sm)
         
@@ -2268,6 +2398,255 @@ class AIChatRoomApp(App):
     def start_voice_input(self):
         """Start voice input (placeholder)."""
         self.add_system_message("🎤 Voice input coming soon!")
+    
+    # ========== Model Management ==========
+    
+    def refresh_models(self):
+        """Refresh the models list."""
+        self._update_models_screen()
+    
+    def switch_models_tab(self, tab: str):
+        """Switch between Available/Installed/Recommended tabs."""
+        self._update_models_screen(tab)
+    
+    def _update_models_screen(self, tab: str = 'available'):
+        """Update the models screen content."""
+        try:
+            models_screen = self.sm.get_screen('models')
+            models_list = models_screen.ids.models_list
+            storage_info = models_screen.ids.storage_info
+            
+            # Clear current list
+            models_list.clear_widgets()
+            
+            if not self.model_manager:
+                models_list.add_widget(Label(
+                    text="Model manager not available",
+                    color=(0.6, 0.6, 0.6, 1)
+                ))
+                return
+            
+            # Update storage info
+            usage = self.model_manager.get_storage_usage()
+            storage_info.text = f"{usage['model_count']} models installed • {usage['total_human']} used"
+            
+            # Get models based on tab
+            if tab == 'installed':
+                models = self.model_manager.get_installed_models()
+                if not models:
+                    models_list.add_widget(Label(
+                        text="No models installed yet",
+                        size_hint_y=None, height=dp(48),
+                        color=(0.6, 0.6, 0.6, 1)
+                    ))
+                    return
+                for model in models:
+                    self._add_installed_model_item(models_list, model)
+            elif tab == 'recommended':
+                # Assume 8GB RAM and TPU for Pixel 10 Pro
+                models = self.model_manager.get_recommended_models(device_ram_mb=8192, has_tpu=True)
+                for model in models[:5]:  # Top 5 recommendations
+                    installed = self.model_manager.is_model_installed(model.id)
+                    self._add_model_item(models_list, model, installed, recommended=True)
+            else:  # available
+                models = self.model_manager.get_available_models()
+                for model in models:
+                    installed = self.model_manager.is_model_installed(model.id)
+                    self._add_model_item(models_list, model, installed)
+        except Exception as e:
+            print(f"Error updating models screen: {e}")
+    
+    def _add_model_item(self, container, model, installed: bool, recommended: bool = False):
+        """Add a model item to the list."""
+        item = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(100), padding=dp(8), spacing=dp(12))
+        
+        # Background - use callback to redraw on resize/reposition
+        def update_canvas(widget, *args):
+            self._draw_model_bg(widget, recommended)
+        
+        with item.canvas.before:
+            Color(*get_color_from_hex('#2D2D3D' if recommended else '#2D2D2D'))
+            RoundedRectangle(pos=item.pos, size=item.size, radius=[dp(8)])
+        item.bind(pos=update_canvas)
+        item.bind(size=update_canvas)
+        
+        # Info section
+        info = BoxLayout(orientation='vertical', spacing=dp(4))
+        
+        # Name row
+        name_row = BoxLayout(size_hint_y=None, height=dp(24), spacing=dp(8))
+        name_label = Label(text=model.name, bold=True, font_size=sp(14), halign='left', text_size=(dp(200), None))
+        name_row.add_widget(name_label)
+        
+        if installed:
+            installed_badge = Label(text='✓', size_hint_x=None, width=dp(24), color=(0.2, 0.8, 0.2, 1))
+            name_row.add_widget(installed_badge)
+        
+        if model.supports_tpu:
+            tpu_badge = Label(text='TPU', size_hint_x=None, width=dp(40), font_size=sp(10), color=(0.4, 0.6, 1, 1))
+            name_row.add_widget(tpu_badge)
+        
+        if recommended:
+            rec_badge = Label(text='⭐', size_hint_x=None, width=dp(24))
+            name_row.add_widget(rec_badge)
+        
+        info.add_widget(name_row)
+        
+        # Description
+        desc_label = Label(
+            text=model.description[:80] + '...' if len(model.description) > 80 else model.description,
+            font_size=sp(11), color=(0.7, 0.7, 0.7, 1), halign='left', text_size=(dp(250), None)
+        )
+        info.add_widget(desc_label)
+        
+        # Size and RAM info
+        size_row = BoxLayout(size_hint_y=None, height=dp(20))
+        size_label = Label(
+            text=f"📦 {model.size_human} • 💾 {model.required_ram_mb}MB RAM • {model.quantization or 'default'}",
+            font_size=sp(10), color=(0.5, 0.5, 0.5, 1), halign='left', text_size=(dp(250), None)
+        )
+        size_row.add_widget(size_label)
+        info.add_widget(size_row)
+        
+        item.add_widget(info)
+        
+        # Action button
+        if installed:
+            btn = Button(text='🗑️', size_hint=(None, None), size=(dp(48), dp(48)), background_color=(0.8, 0.2, 0.2, 1))
+            btn.bind(on_release=lambda x, m=model.id: self._delete_model(m))
+        else:
+            btn = Button(text='⬇️', size_hint=(None, None), size=(dp(48), dp(48)), background_color=(0.2, 0.6, 0.2, 1))
+            btn.bind(on_release=lambda x, m=model.id: self._download_model(m))
+        
+        item.add_widget(btn)
+        container.add_widget(item)
+    
+    def _add_installed_model_item(self, container, model_info: Dict):
+        """Add an installed model item to the list."""
+        item = BoxLayout(orientation='horizontal', size_hint_y=None, height=dp(80), padding=dp(8), spacing=dp(12))
+        
+        with item.canvas.before:
+            Color(*get_color_from_hex('#2D3D2D'))  # Green tint for installed
+            RoundedRectangle(pos=item.pos, size=item.size, radius=[dp(8)])
+        
+        # Info section
+        info = BoxLayout(orientation='vertical', spacing=dp(4))
+        
+        name_label = Label(text=model_info['name'], bold=True, font_size=sp(14), halign='left', text_size=(dp(200), None))
+        info.add_widget(name_label)
+        
+        size_bytes = model_info.get('size_bytes', 0)
+        size_str = f"{size_bytes / (1024*1024*1024):.2f} GB" if size_bytes > 1024*1024*1024 else f"{size_bytes / (1024*1024):.1f} MB"
+        size_label = Label(text=f"📦 {size_str}", font_size=sp(11), color=(0.6, 0.6, 0.6, 1), halign='left', text_size=(dp(200), None))
+        info.add_widget(size_label)
+        
+        installed_label = Label(text=f"Installed: {model_info.get('installed_at', 'Unknown')}", font_size=sp(10), color=(0.5, 0.5, 0.5, 1), halign='left', text_size=(dp(200), None))
+        info.add_widget(installed_label)
+        
+        item.add_widget(info)
+        
+        # Actions
+        actions = BoxLayout(orientation='vertical', size_hint_x=None, width=dp(60), spacing=dp(4))
+        
+        use_btn = Button(text='✓', size_hint_y=None, height=dp(36), background_color=(0.2, 0.6, 0.2, 1))
+        use_btn.bind(on_release=lambda x, m=model_info['id']: self._use_model(m))
+        actions.add_widget(use_btn)
+        
+        del_btn = Button(text='🗑️', size_hint_y=None, height=dp(36), background_color=(0.6, 0.2, 0.2, 1))
+        del_btn.bind(on_release=lambda x, m=model_info['id']: self._delete_model(m))
+        actions.add_widget(del_btn)
+        
+        item.add_widget(actions)
+        container.add_widget(item)
+    
+    def _draw_model_bg(self, widget, recommended: bool = False):
+        """Redraw model item background."""
+        with widget.canvas.before:
+            Color(*get_color_from_hex('#2D2D3D' if recommended else '#2D2D2D'))
+            RoundedRectangle(pos=widget.pos, size=widget.size, radius=[dp(8)])
+    
+    def _download_model(self, model_id: str):
+        """Download a model."""
+        if not self.model_manager:
+            self.add_system_message("❌ Model manager not available")
+            return
+        
+        self.add_system_message(f"⬇️ Starting download of {model_id}...")
+        self.add_system_message("📱 This may take a while depending on your connection.")
+        
+        def progress_callback(progress):
+            # Update UI on main thread
+            Clock.schedule_once(lambda dt: self._update_download_progress(progress), 0)
+        
+        def do_download():
+            try:
+                result = self.model_manager.download_model(model_id, callback=progress_callback)
+                if result and result.status == "complete":
+                    Clock.schedule_once(lambda dt: self._download_complete(model_id), 0)
+                else:
+                    error = result.error_message if result else "Unknown error"
+                    Clock.schedule_once(lambda dt: self._download_failed(model_id, error), 0)
+            except Exception as e:
+                Clock.schedule_once(lambda dt: self._download_failed(model_id, str(e)), 0)
+        
+        # Run download in background thread
+        import threading
+        threading.Thread(target=do_download, daemon=True).start()
+    
+    def _update_download_progress(self, progress):
+        """Update download progress in UI."""
+        # Track last reported percentage to report every 10%
+        current_ten = int(progress.percent / 10)
+        last_ten = getattr(self, '_last_progress_ten', -1)
+        
+        if current_ten > last_ten:
+            self._last_progress_ten = current_ten
+            self.add_system_message(f"⬇️ {progress.model_id}: {progress.percent:.0f}% ({progress.speed_human})")
+    
+    def _download_complete(self, model_id: str):
+        """Handle download completion."""
+        self._last_progress_ten = -1  # Reset progress tracker
+        self.add_system_message(f"✅ {model_id} downloaded successfully!")
+        self.refresh_models()
+    
+    def _download_failed(self, model_id: str, error: str):
+        """Handle download failure."""
+        self._last_progress_ten = -1  # Reset progress tracker
+        self.add_system_message(f"❌ Failed to download {model_id}: {error}")
+    
+    def _delete_model(self, model_id: str):
+        """Delete an installed model."""
+        if not self.model_manager:
+            return
+        
+        if self.model_manager.delete_model(model_id):
+            self.add_system_message(f"🗑️ Deleted {model_id}")
+            self.refresh_models()
+        else:
+            self.add_system_message(f"❌ Failed to delete {model_id}")
+    
+    def _use_model(self, model_id: str):
+        """Set a model as the current model."""
+        if not self.model_manager:
+            return
+        
+        model_path = self.model_manager.get_model_path(model_id)
+        if model_path:
+            self.current_model = f"ollama/{model_id}"
+            self.add_system_message(f"🧠 Now using model: {model_id}")
+            
+            # Update settings screen
+            try:
+                settings = self.sm.get_screen('settings')
+                settings.ids.model_spinner.text = self.current_model
+            except Exception:
+                pass
+    
+    def import_local_model(self):
+        """Import a model from local storage."""
+        self.show_file_chooser()
+        self.add_system_message("📥 Select a model file (.gguf, .onnx, .tflite)")
+        # Note: The actual import would be handled in the file chooser callback
 
 
 # ============================================

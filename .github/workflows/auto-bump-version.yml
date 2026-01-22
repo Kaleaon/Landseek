@@ -1,0 +1,86 @@
+name: Auto bump version (PR)
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [ main, develop ]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-bump-version-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump version if needed
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Compute base/head versions
+        id: versions
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}:${{ github.base_ref }}"
+          
+          # Extract version from base branch pyproject.toml
+          BASE_VERSION=$(git show "${{ github.base_ref }}:pyproject.toml" | grep '^version' | head -1 | cut -d'"' -f2 || echo "1.0.0")
+          
+          # Extract version from current branch
+          HEAD_VERSION=$(grep '^version' pyproject.toml | head -1 | cut -d'"' -f2 || echo "1.0.0")
+          
+          echo "base=$BASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Base version: $BASE_VERSION"
+          echo "Head version: $HEAD_VERSION"
+
+      - name: Bump version if needed
+        id: bump
+        run: |
+          set -euo pipefail
+          BASE="${{ steps.versions.outputs.base }}"
+          HEAD="${{ steps.versions.outputs.head }}"
+          
+          # Compare versions (simple string comparison for semver)
+          if [ "$HEAD" == "$BASE" ]; then
+            # Bump patch version
+            IFS='.' read -r major minor patch <<< "$BASE"
+            NEW_PATCH=$((patch + 1))
+            NEW_VERSION="${major}.${minor}.${NEW_PATCH}"
+            
+            # Update pyproject.toml
+            sed -i "s/^version = \".*\"/version = \"$NEW_VERSION\"/" pyproject.toml
+            
+            echo "new=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Bumped version to $NEW_VERSION"
+          else
+            echo "No bump needed. Head version ($HEAD) differs from base ($BASE)"
+            echo "new=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit & push (only if changed)
+        if: ${{ steps.bump.outputs.new != '' }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: bump version to ${{ steps.bump.outputs.new }}"
+          git push

@@ -7,6 +7,8 @@ A conversational AI chat room application powered by [Recursive Language Models 
 - 🎭 **Multi-AI Participants**: Chat room with multiple AI personalities
 - 🚀 **Gemma 3 4B Powered**: Optimized for Google Pixel TPU acceleration
 - 📱 **Pixel TPU Optimized**: Leverages on-device TPU for fast local inference
+- 🔧 **Tool Use**: AI can use built-in tools (calculator, file ops, text analysis, etc.)
+- 📄 **Document Processing**: Upload and analyze documents with AI
 - 🔄 **Recursive Context**: Uses RLM for intelligent context processing
 - 🏠 **Local First**: Runs fully on-device - no cloud required
 - 💾 **Lightweight**: ~4GB model size, efficient memory usage
@@ -149,12 +151,58 @@ Commands:
   /remove <name>     - Remove a document
   /analyze <ai> <prompt> - Have an AI analyze the document
   /ask <ai> <question>   - Ask a specific AI a question
+  /tools             - List available tools
+  /tool <name> [args]    - Execute a tool directly
 ==========================
 
 You: What do you think about the future of AI?
 [10:30:15] Nova: The future of AI is fascinating! I think we're on the cusp of...
 [10:30:18] Echo: Like a symphony of silicon minds composing together...
 [10:30:21] Sage: From a philosophical standpoint, AI represents...
+```
+
+### Tool Use
+
+AI participants can use built-in tools, and you can also use them directly:
+
+```
+You: /tools
+Available Tools:
+
+📁 MATH
+  • calculate(expression): Evaluate a mathematical expression...
+  • unit_convert(value, from_unit, to_unit): Convert between units...
+
+📁 DATETIME
+  • get_current_time(timezone, format): Get the current date and time...
+  • calculate_date(base_date, days, weeks): Calculate a date...
+
+📁 TEXT
+  • word_count(text): Count words, characters, sentences...
+  • search_text(text, pattern, case_sensitive): Search for pattern...
+  • extract_urls(text): Extract all URLs from text...
+  • extract_emails(text): Extract all email addresses...
+
+📁 DATA
+  • json_parse(json_string, query_path): Parse and query JSON...
+
+📁 FILESYSTEM
+  • list_files(path, pattern): List files in a directory...
+  • read_file(path, max_lines): Read the contents of a file...
+
+📁 SYSTEM
+  • get_system_info(): Get system information...
+  • run_command(command): Run a safe shell command...
+
+You: /tool calculate(expression=sqrt(144) + pi)
+🔧 calculate: ✅ 15.141592653589793
+
+You: /tool unit_convert(value=100, from_unit=celsius, to_unit=fahrenheit)
+🔧 unit_convert: ✅ 100 celsius = 212.0000 fahrenheit
+
+You: What's 25 * 4?
+[10:33:01] Nova: Let me calculate that @calculate(expression=25*4)
+🔧 Tool Result: ✅ 100
 ```
 
 ### Document Upload & Analysis
@@ -205,6 +253,19 @@ You [report.txt]: /ask Echo Make this report more engaging
 | `/remove <name>` | Remove a document |
 | `/analyze <ai> <prompt>` | Have a specific AI analyze the active document |
 | `/ask <ai> <question>` | Ask a specific AI a question |
+| `/tools` | List all available tools |
+| `/tool <name>(args)` | Execute a tool directly (e.g., `/tool calculate(expression=2+2)`) |
+
+### Available Tools
+
+| Category | Tools |
+|----------|-------|
+| **Math** | `calculate`, `unit_convert` |
+| **DateTime** | `get_current_time`, `calculate_date` |
+| **Text** | `word_count`, `search_text`, `extract_urls`, `extract_emails` |
+| **Data** | `json_parse` |
+| **Filesystem** | `list_files`, `read_file` |
+| **System** | `get_system_info`, `run_command` |
 
 ## Supported Models
 

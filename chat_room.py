@@ -10,6 +10,7 @@ Features:
 - Multi-AI participant chat room
 - Powered by Gemma 3 4B model (optimized for Pixel TPU)
 - Document upload for AI processing
+- Tool use capabilities (calculator, file ops, text analysis, etc.)
 - RLM-based recursive context processing
 - Local-first architecture (runs on-device via Ollama/AI Edge)
 - Simple terminal-based interface (easy to adapt for mobile UI)
@@ -38,6 +39,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from rlm import RLM
+from tools import tool_registry, parse_tool_call, get_tools_description, ToolResult
 
 
 # Supported document types
@@ -137,15 +139,17 @@ class AIChatRoom:
     Features:
     - Multi-AI conversations
     - Document upload and processing
+    - Tool use capabilities
     - Optimized for local execution on Pixel 10 Pro with Gemma models
     """
     
-    def __init__(self, name: str = "AI Chat Room"):
+    def __init__(self, name: str = "AI Chat Room", enable_tools: bool = True):
         """
         Initialize the chat room.
         
         Args:
             name: Name of the chat room
+            enable_tools: Whether to enable AI tool use
         """
         self.name = name
         self.messages: List[ChatMessage] = []
@@ -153,6 +157,7 @@ class AIChatRoom:
         self.documents: Dict[str, Document] = {}  # Uploaded documents
         self.active_document: Optional[str] = None  # Currently selected document
         self.context_window_size = 10  # Number of messages to include in context
+        self.enable_tools = enable_tools  # Enable tool use
         
     def add_participant(self, participant: AIParticipant) -> None:
         """
@@ -300,6 +305,37 @@ class AIChatRoom:
         self.messages.append(msg)
         return msg
     
+    def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
+        """
+        Execute a tool by name.
+        
+        Args:
+            tool_name: Name of the tool to execute
+            **kwargs: Tool arguments
+            
+        Returns:
+            ToolResult with success status and output
+        """
+        return tool_registry.execute(tool_name, **kwargs)
+    
+    def _get_tools_instruction(self) -> str:
+        """Get instruction text for tool use."""
+        if not self.enable_tools:
+            return ""
+        
+        tools = tool_registry.list_tools()
+        tool_list = []
+        for tool in tools:
+            params = ", ".join(f"{k}" for k in tool.parameters.keys())
+            tool_list.append(f"  - @{tool.name}({params}): {tool.description[:50]}...")
+        
+        return f"""
+
+You can use tools by including @tool_name(arg1=value1, arg2=value2) in your response.
+Available tools:
+{chr(10).join(tool_list[:10])}
+Use /tools to see all available tools."""
+    
     async def get_ai_response(
         self, 
         ai_name: str, 
@@ -332,8 +368,11 @@ class AIChatRoom:
                 doc_context = self._get_document_context()
                 doc_instruction = f"\n\nA document '{doc.name}' is available for analysis. Reference it when relevant."
         
+        # Include tools instruction
+        tools_instruction = self._get_tools_instruction()
+        
         # Build the query with personality context
-        query = f"""You are {ai.name} in a chat room. Your personality: {ai.personality}{doc_instruction}
+        query = f"""You are {ai.name} in a chat room. Your personality: {ai.personality}{doc_instruction}{tools_instruction}
 
 Recent conversation:
 {context}
@@ -346,6 +385,16 @@ Respond briefly and naturally (1-3 sentences). Stay in character."""
             # Use document content as RLM context for deep processing
             rlm_context = doc_context if doc_context else "Chat room context"
             response = ai.rlm.completion(query=query, context=rlm_context)
+            
+            # Check if AI used any tools
+            if self.enable_tools:
+                tool_call = parse_tool_call(response)
+                if tool_call:
+                    # Execute the tool
+                    result = self.execute_tool(tool_call["tool"], **tool_call["arguments"])
+                    # Add tool result to response
+                    response = f"{response}\n\n🔧 Tool Result: {result}"
+            
             msg = await self.send_message(ai.name, response)
             return msg
         except Exception as e:
@@ -482,6 +531,8 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
     print("  /remove <name>     - Remove a document")
     print("  /analyze <ai> <prompt> - Have an AI analyze the document")
     print("  /ask <ai> <question>   - Ask a specific AI a question")
+    print("  /tools             - List available tools")
+    print("  /tool <name> [args]    - Execute a tool directly")
     print("  Type anything else to send a message")
     print(f"{'='*60}\n")
     
@@ -502,6 +553,30 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
             if user_input.lower() == "/clear":
                 chat_room.messages.clear()
                 print("Chat history cleared.")
+                continue
+            
+            if user_input.lower() == "/tools":
+                print(get_tools_description())
+                continue
+            
+            if user_input.lower().startswith("/tool"):
+                parts = user_input.split(maxsplit=1)
+                if len(parts) < 2:
+                    print("Usage: /tool <tool_name>(arg1=value1, arg2=value2)")
+                    print("Example: /tool calculate(expression=2+2)")
+                    print("Use /tools to see available tools.")
+                    continue
+                # Parse tool call
+                tool_str = parts[1].strip()
+                # Add @ prefix if not present for parsing
+                if not tool_str.startswith("@"):
+                    tool_str = "@" + tool_str
+                tool_call = parse_tool_call(tool_str)
+                if tool_call:
+                    result = chat_room.execute_tool(tool_call["tool"], **tool_call["arguments"])
+                    print(f"\n🔧 {tool_call['tool']}: {result}\n")
+                else:
+                    print("❌ Invalid tool syntax. Use: /tool name(arg1=value1)")
                 continue
             
             if user_input.lower() == "/docs":

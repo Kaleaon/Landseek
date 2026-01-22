@@ -5,9 +5,12 @@ A conversational AI chat room application powered by [Recursive Language Models 
 ## Features
 
 - 🎭 **10 AI Personalities**: Chat room with up to 10 unique AI personalities (Nova, Echo, Sage, Spark, Atlas, Luna, Cipher, Muse, Phoenix, Zen)
+- ✏️ **Customizable Names**: Rename any AI personality to your preference
+- 🔒 **Private Conversations**: Private 1-on-1 chats between any participants (User-to-AI, AI-to-AI)
+- 💾 **Persistent State**: Chat history, emotions, and relationships saved to Documents folder
 - 🌐 **P2P Networking**: Share your LLM capabilities with others via share codes - no server required!
 - 🚀 **Gemma 3 4B Powered**: Optimized for Google Pixel TPU acceleration
-- 📱 **Android App**: Native Android application with Kivy
+- 📱 **Full Android GUI**: Complete Kivy-based Android app with modern Material Design UI
 - 📦 **Add-on System**: Extensible plugin architecture for custom functionality
 - 🔧 **Tool Use**: AI can use built-in tools (calculator, file ops, text analysis, etc.)
 - 📄 **Document Processing**: Upload and analyze documents with AI
@@ -257,6 +260,11 @@ You [report.txt]: /ask Echo Make this report more engaging
 | `/ask <ai> <question>` | Ask a specific AI a question |
 | `/tools` | List all available tools |
 | `/tool <name>(args)` | Execute a tool directly (e.g., `/tool calculate(expression=2+2)`) |
+| `/private <ai>` | Start a private conversation with an AI |
+| `/endprivate` | End the current private conversation |
+| `/rename <ai> <newname>` | Rename an AI participant |
+| `/add <ai_id>` | Add an AI to the active chat |
+| `/remove <ai_id>` | Remove an AI from the active chat |
 
 ### Available Tools
 
@@ -285,6 +293,59 @@ The chat room supports up to **10 unique AI personalities**, each with distinct 
 | **Muse** | 🎨 | Artistic, inspiring, poetic | artistic, inspiring, poetic |
 | **Phoenix** | 🔥 | Resilient, transformative, growth-focused | resilient, growth, transformative |
 | **Zen** | ☯️ | Calm, mindful, peaceful | calm, mindful, peaceful |
+
+### Customizing AI Names
+
+You can rename any AI personality:
+
+```
+You: /rename nova Starlight
+✏️ Nova is now known as Starlight
+
+You: Hey Starlight, what do you think?
+[10:30:15] Starlight: As someone who's always curious about new ideas...
+```
+
+### Managing AI Participants
+
+Add or remove AIs from the active chat:
+
+```
+# Add an AI to the conversation
+You: /add phoenix
+➕ 🔥 Phoenix joined the chat!
+
+# Remove an AI
+You: /remove sage
+➖ 🦉 Sage left the chat.
+
+# List all personalities
+You: /personalities
+```
+
+## Private Conversations
+
+Have private 1-on-1 conversations with any AI participant. These are saved separately and allow for more personal interactions.
+
+### Starting a Private Chat
+
+```
+You: /private nova
+🔒 Started private chat with Nova
+
+You [Private with 🌟 Nova]: I need some personal advice...
+[10:31:45] 🔒 Nova → You: *speaking privately* I'm here to help...
+
+You: /endprivate
+🔓 Private conversation ended
+```
+
+### Private Chat Features
+
+- **Separate History**: Private conversations are stored separately
+- **More Personal**: AIs behave more intimately in private
+- **AI-to-AI**: AIs can also have private conversations with each other
+- **Persistent**: Private chat history is saved to Documents/AIChat
 
 ### Using Personalities
 
@@ -395,6 +456,7 @@ AI Chat Room
 │   │   └── types.py     # Type definitions
 │   ├── tools.py          # Built-in tools
 │   ├── personalities.py  # AI personality definitions (10 personalities)
+│   ├── ai_state.py       # Persistent state management
 │   ├── p2p.py            # P2P networking for sharing LLMs
 │   └── addons/           # Add-on system
 │       ├── __init__.py  # Add-on manager
@@ -406,6 +468,8 @@ AI Chat Room
 ```
 
 ## Android App
+
+The Android app provides a **full graphical user interface** with modern Material Design.
 
 ### Building the APK
 
@@ -421,12 +485,43 @@ buildozer android debug
 # The APK will be in the bin/ directory
 ```
 
-### Features
-- Native Android UI with Material Design
-- Chat with multiple AI personalities
-- Document upload and analysis
-- Add-on management
-- Settings for model configuration
+### App Features
+
+**Main Chat Screen**
+- 💬 Real-time chat with multiple AI personalities
+- 📱 Active AIs bar showing current participants
+- 🔒 Private chat indicator when in private mode
+- 📄 Document attachment indicator
+- ➤ Send button and voice input (coming soon)
+
+**Navigation Drawer**
+- 💬 Chat - Main conversation
+- 👥 Participants - Manage AI personalities
+- 🔒 Private Chats - Access private conversations
+- 📄 Documents - Manage uploaded files
+- 🔧 Tools - View available tools
+- 📦 Add-ons - Plugin management
+- ⚙️ Settings - App configuration
+
+**Participants Screen**
+- View all 10 AI personalities
+- Toggle AIs active/inactive
+- Rename AI personalities
+- Start private conversations
+- See AI emotional states
+
+**Settings Screen**
+- User profile name
+- Model selection (Gemma 3 4B, etc.)
+- Ollama URL configuration
+- API key management
+- P2P hosting/joining
+- Data export/import
+
+**Private Chat Features**
+- Separate conversation threads
+- Personal AI interactions
+- Persistent history in Documents folder
 
 ## Add-on System
 

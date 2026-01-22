@@ -51,6 +51,11 @@ from p2p import (
     generate_room_code, encode_connection_info, decode_connection_info,
     get_local_ip, SimpleP2PHandler
 )
+from ai_state import (
+    AIStateManager, AIState, PrivateConversation, ChatHistoryEntry,
+    EmotionalState, get_state_manager, initialize_state_manager,
+    get_documents_folder
+)
 
 
 # Supported document types
@@ -113,9 +118,19 @@ class AIParticipant:
     personality: str
     model: str
     rlm: Optional[RLM] = None
+    ai_id: str = None  # Unique ID for state management
+    display_name: str = None  # Customizable display name
+    avatar: str = "🤖"
+    state: Optional[AIState] = None  # Persistent state
     
     def __post_init__(self):
         """Initialize the RLM instance for this AI."""
+        # Set defaults
+        if self.ai_id is None:
+            self.ai_id = self.name.lower()
+        if self.display_name is None:
+            self.display_name = self.name
+            
         # For local Gemma 3 4B on Pixel TPU, use Ollama (no API key needed)
         # Falls back to Google AI API if GOOGLE_API_KEY is set
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -137,6 +152,16 @@ class AIParticipant:
             rlm_kwargs["api_base"] = api_base
         
         self.rlm = RLM(**rlm_kwargs)
+    
+    def rename(self, new_name: str) -> None:
+        """Change the display name of this AI."""
+        self.display_name = new_name
+        if self.state:
+            self.state.rename(new_name)
+    
+    def get_display_name(self) -> str:
+        """Get the display name with avatar."""
+        return f"{self.avatar} {self.display_name}"
 
 
 class AIChatRoom:
@@ -153,6 +178,9 @@ class AIChatRoom:
     - Tool use capabilities
     - Add-on/plugin support
     - P2P networking for sharing LLM capabilities
+    - Persistent state (chat history, emotions, relationships)
+    - Private conversations between participants
+    - Customizable AI names via settings
     - Optimized for local execution on Pixel 10 Pro with Gemma models
     """
     
@@ -162,7 +190,8 @@ class AIChatRoom:
         enable_tools: bool = True, 
         enable_addons: bool = True,
         enable_p2p: bool = False,
-        max_personalities: int = MAX_PERSONALITIES
+        max_personalities: int = MAX_PERSONALITIES,
+        enable_state: bool = True
     ):
         """
         Initialize the chat room.
@@ -173,6 +202,7 @@ class AIChatRoom:
             enable_addons: Whether to enable add-ons
             enable_p2p: Whether to enable P2P networking
             max_personalities: Maximum number of AI personalities (up to 10)
+            enable_state: Whether to enable persistent state management
         """
         self.name = name
         self.messages: List[ChatMessage] = []
@@ -183,9 +213,15 @@ class AIChatRoom:
         self.enable_tools = enable_tools  # Enable tool use
         self.enable_addons = enable_addons  # Enable add-ons
         self.enable_p2p = enable_p2p  # Enable P2P networking
+        self.enable_state = enable_state  # Enable state management
         self.max_personalities = min(max_personalities, MAX_PERSONALITIES)
         self.addon_manager = get_addon_manager() if enable_addons else None
         self.personality_manager = get_personality_manager()
+        
+        # State management
+        self.state_manager: Optional[AIStateManager] = None
+        if enable_state:
+            self.state_manager = get_state_manager()
         
         # P2P networking
         self.p2p_server: Optional[P2PServer] = None
@@ -193,11 +229,23 @@ class AIChatRoom:
         self.p2p_mode: Optional[str] = None  # "host" or "client"
         self.connected_peers: Dict[str, PeerInfo] = {}
         
+        # Private conversations tracking
+        self._active_private_chat: Optional[Tuple[str, str]] = None  # (from, to)
+        
+        # User name for state tracking
+        self.user_name = "User"
+        
         # Load add-ons
         if self.addon_manager:
             count = self.addon_manager.load_all()
             if count > 0:
                 self._add_system_message(f"Loaded {count} add-on(s)")
+        
+        # Load saved state for user
+        if self.state_manager:
+            saved_user = self.state_manager.get_setting("user_name")
+            if saved_user:
+                self.user_name = saved_user
     
     def start_hosting(self, port: int = 8765) -> Optional[str]:
         """
@@ -302,27 +350,231 @@ class AIChatRoom:
             True if added, False if at max capacity
         """
         if len(self.participants) >= self.max_personalities:
-            self._add_system_message(f"Cannot add {participant.name}: Maximum {self.max_personalities} personalities reached.")
+            self._add_system_message(f"Cannot add {participant.display_name}: Maximum {self.max_personalities} personalities reached.")
             return False
-        self.participants[participant.name] = participant
-        self._add_system_message(f"{participant.name} has joined the chat.")
+        
+        # Load or create state
+        if self.state_manager:
+            state = self.state_manager.get_state(participant.ai_id)
+            if not state:
+                state = self.state_manager.create_state(
+                    ai_id=participant.ai_id,
+                    display_name=participant.display_name,
+                    personality=participant.personality,
+                    avatar=participant.avatar
+                )
+            participant.state = state
+            participant.display_name = state.display_name
+            state.is_active = True
+            self.state_manager.save_state(state)
+        
+        self.participants[participant.ai_id] = participant
+        self._add_system_message(f"{participant.get_display_name()} has joined the chat.")
         return True
     
-    def remove_participant(self, name: str) -> bool:
+    def remove_participant(self, ai_id: str) -> bool:
         """
         Remove an AI participant from the chat room.
         
         Args:
-            name: Name of the participant to remove
+            ai_id: ID of the participant to remove
             
         Returns:
             True if removed, False if not found
         """
-        if name in self.participants:
-            del self.participants[name]
-            self._add_system_message(f"{name} has left the chat.")
+        if ai_id in self.participants:
+            participant = self.participants[ai_id]
+            display_name = participant.get_display_name()
+            
+            # Update state
+            if self.state_manager and participant.state:
+                participant.state.is_active = False
+                self.state_manager.save_state(participant.state)
+            
+            del self.participants[ai_id]
+            self._add_system_message(f"{display_name} has left the chat.")
             return True
         return False
+    
+    def rename_participant(self, ai_id: str, new_name: str) -> bool:
+        """
+        Rename an AI participant.
+        
+        Args:
+            ai_id: ID of the participant to rename
+            new_name: New display name
+            
+        Returns:
+            True if renamed, False if not found
+        """
+        if ai_id in self.participants:
+            participant = self.participants[ai_id]
+            old_name = participant.display_name
+            participant.rename(new_name)
+            
+            # Save state
+            if self.state_manager and participant.state:
+                self.state_manager.save_state(participant.state)
+            
+            self._add_system_message(f"{old_name} is now known as {new_name}")
+            return True
+        return False
+    
+    def get_participant_by_name(self, name: str) -> Optional[AIParticipant]:
+        """Find a participant by display name or ID."""
+        # Check by ID first
+        if name in self.participants:
+            return self.participants[name]
+        # Check by display name
+        name_lower = name.lower()
+        for ai_id, participant in self.participants.items():
+            if participant.display_name.lower() == name_lower:
+                return participant
+        return None
+    
+    # Private conversation methods
+    def start_private_chat(self, from_participant: str, to_participant: str) -> bool:
+        """
+        Start a private conversation between two participants.
+        
+        Args:
+            from_participant: Who is initiating
+            to_participant: Who they want to chat with
+            
+        Returns:
+            True if private chat started
+        """
+        # Validate participants exist (for AIs) or is user
+        to_exists = to_participant == self.user_name or to_participant in self.participants
+        from_exists = from_participant == self.user_name or from_participant in self.participants
+        
+        if not to_exists:
+            # Try by display name
+            found = self.get_participant_by_name(to_participant)
+            if found:
+                to_participant = found.ai_id
+            else:
+                return False
+        
+        self._active_private_chat = (from_participant, to_participant)
+        self._add_system_message(f"🔒 Private conversation started between {from_participant} and {to_participant}")
+        return True
+    
+    def end_private_chat(self) -> None:
+        """End the current private conversation."""
+        if self._active_private_chat:
+            self._add_system_message("🔓 Private conversation ended")
+            self._active_private_chat = None
+    
+    def is_in_private_chat(self) -> bool:
+        """Check if currently in a private conversation."""
+        return self._active_private_chat is not None
+    
+    def send_private_message(
+        self, 
+        from_participant: str, 
+        to_participant: str, 
+        content: str
+    ) -> Optional[ChatMessage]:
+        """
+        Send a private message between two participants.
+        
+        Args:
+            from_participant: Sender
+            to_participant: Recipient
+            content: Message content
+            
+        Returns:
+            The message, or None if failed
+        """
+        # Save to state manager
+        if self.state_manager:
+            self.state_manager.add_private_message(from_participant, to_participant, content)
+        
+        # Create message (marked as private)
+        msg = ChatMessage(
+            sender=f"🔒 {from_participant} → {to_participant}",
+            content=content
+        )
+        self.messages.append(msg)
+        return msg
+    
+    async def get_private_ai_response(
+        self, 
+        ai_id: str, 
+        from_participant: str,
+        prompt: str
+    ) -> Optional[ChatMessage]:
+        """
+        Get a private response from an AI to another participant.
+        
+        Args:
+            ai_id: The AI to respond
+            from_participant: Who the AI is responding to
+            prompt: The message to respond to
+            
+        Returns:
+            The AI's private response
+        """
+        if ai_id not in self.participants:
+            return None
+        
+        ai = self.participants[ai_id]
+        
+        # Get private conversation history if available
+        private_context = ""
+        if self.state_manager:
+            conv = self.state_manager.get_or_create_conversation(ai_id, from_participant)
+            recent = conv.get_recent_messages(5)
+            if recent:
+                private_context = "\n".join([
+                    f"[Private] {m.sender}: {m.content}" for m in recent
+                ])
+        
+        # Build query
+        query = f"""You are {ai.display_name} in a PRIVATE conversation with {from_participant}. 
+Your personality: {ai.personality}
+
+This is a private, one-on-one conversation. Be more personal and intimate than in group chat.
+
+Previous private messages:
+{private_context}
+
+{from_participant} says: {prompt}
+
+Respond privately to {from_participant}. Be personal and direct."""
+
+        try:
+            response = ai.rlm.completion(query=query, context="Private conversation")
+            
+            # Save to state
+            msg = self.send_private_message(ai.display_name, from_participant, response)
+            
+            # Update AI state
+            if ai.state and self.state_manager:
+                ai.state.update_relationship(from_participant, notes=f"Private chat: {prompt[:50]}")
+                self.state_manager.save_state(ai.state)
+            
+            return msg
+        except Exception as e:
+            return ChatMessage(sender="System", content=f"Error: {e}")
+    
+    def get_private_conversations(self, participant: str) -> List[PrivateConversation]:
+        """Get all private conversations for a participant."""
+        if self.state_manager:
+            return self.state_manager.get_conversations_for(participant)
+        return []
+    
+    def set_user_name(self, name: str) -> None:
+        """Set the user's display name."""
+        self.user_name = name
+        if self.state_manager:
+            self.state_manager.set_setting("user_name", name)
+        
+    def save_all_state(self) -> None:
+        """Save all AI states."""
+        if self.state_manager:
+            self.state_manager.save_all()
         
     def _add_system_message(self, content: str) -> None:
         """Add a system notification message."""
@@ -458,6 +710,14 @@ class AIChatRoom:
         """
         msg = ChatMessage(sender=sender, content=content)
         self.messages.append(msg)
+        
+        # Track in AI states if applicable
+        if self.state_manager:
+            # Record in all active AI states
+            for ai_id, participant in self.participants.items():
+                if participant.state:
+                    participant.state.add_chat_entry(sender, content)
+        
         return msg
     
     def execute_tool(self, tool_name: str, **kwargs) -> ToolResult:
@@ -527,12 +787,12 @@ Use /tools to see all available tools."""
         tools_instruction = self._get_tools_instruction()
         
         # Build the query with personality context
-        query = f"""You are {ai.name} in a chat room. Your personality: {ai.personality}{doc_instruction}{tools_instruction}
+        query = f"""You are {ai.display_name} in a chat room. Your personality: {ai.personality}{doc_instruction}{tools_instruction}
 
 Recent conversation:
 {context}
 
-{prompt or "Continue the conversation naturally. Respond as " + ai.name + "."}
+{prompt or "Continue the conversation naturally. Respond as " + ai.display_name + "."}
 
 Respond briefly and naturally (1-3 sentences). Stay in character."""
         
@@ -550,10 +810,16 @@ Respond briefly and naturally (1-3 sentences). Stay in character."""
                     # Add tool result to response
                     response = f"{response}\n\n🔧 Tool Result: {result}"
             
-            msg = await self.send_message(ai.name, response)
+            msg = await self.send_message(ai.display_name, response)
+            
+            # Update AI state
+            if ai.state and self.state_manager:
+                ai.state.last_active = datetime.now().isoformat()
+                self.state_manager.save_state(ai.state)
+            
             return msg
         except Exception as e:
-            error_msg = f"Error from {ai.name}: {str(e)}"
+            error_msg = f"Error from {ai.display_name}: {str(e)}"
             return ChatMessage(sender="System", content=error_msg)
     
     async def analyze_document(
@@ -565,7 +831,7 @@ Respond briefly and naturally (1-3 sentences). Stay in character."""
         Have a specific AI analyze the active document.
         
         Args:
-            ai_name: Name of the AI to perform analysis
+            ai_name: Name of the AI to perform analysis (ID or display name)
             analysis_prompt: What to analyze/extract from the document
             
         Returns:
@@ -575,13 +841,13 @@ Respond briefly and naturally (1-3 sentences). Stay in character."""
         if not doc:
             return ChatMessage(sender="System", content="No document selected. Use /upload to add one.")
         
-        if ai_name not in self.participants:
+        # Find AI by ID or display name
+        ai = self.get_participant_by_name(ai_name)
+        if not ai:
             return ChatMessage(sender="System", content=f"AI '{ai_name}' not found.")
         
-        ai = self.participants[ai_name]
-        
         # Build analysis query
-        query = f"""You are {ai.name}, an AI assistant. Your personality: {ai.personality}
+        query = f"""You are {ai.display_name}, an AI assistant. Your personality: {ai.personality}
 
 Analyze the following document and respond to this request:
 {analysis_prompt}
@@ -590,10 +856,10 @@ Provide a thorough but concise analysis. Stay in character."""
 
         try:
             response = ai.rlm.completion(query=query, context=doc.content)
-            msg = await self.send_message(ai.name, f"📊 Analysis: {response}")
+            msg = await self.send_message(ai.display_name, f"📊 Analysis: {response}")
             return msg
         except Exception as e:
-            error_msg = f"Error from {ai.name}: {str(e)}"
+            error_msg = f"Error from {ai.display_name}: {str(e)}"
             return ChatMessage(sender="System", content=error_msg)
     
     async def run_conversation_round(
@@ -646,19 +912,28 @@ def create_default_participants(model: str = "ollama/gemma3:4b") -> List[AIParti
             name="Nova",
             personality="Curious and analytical. Loves exploring ideas deeply. "
                        "Asks thought-provoking questions.",
-            model=model
+            model=model,
+            ai_id="nova",
+            display_name="Nova",
+            avatar="🌟"
         ),
         AIParticipant(
             name="Echo",
             personality="Creative and playful. Uses metaphors and storytelling. "
                        "Brings humor and lightness to conversations.",
-            model=model
+            model=model,
+            ai_id="echo",
+            display_name="Echo",
+            avatar="🎭"
         ),
         AIParticipant(
             name="Sage",
             personality="Wise and contemplative. Shares insights from philosophy "
                        "and science. Offers balanced perspectives.",
-            model=model
+            model=model,
+            ai_id="sage",
+            display_name="Sage",
+            avatar="🦉"
         ),
     ]
 
@@ -684,7 +959,10 @@ def create_participants_from_personalities(
         AIParticipant(
             name=p.name,
             personality=p.personality,
-            model=model
+            model=model,
+            ai_id=p.name.lower(),
+            display_name=p.name,
+            avatar=p.avatar
         )
         for p in personalities
     ]

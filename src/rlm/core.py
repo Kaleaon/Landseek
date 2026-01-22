@@ -3,13 +3,13 @@
 import asyncio
 import concurrent.futures
 import re
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 
 import litellm
 
 from .types import Message
 from .repl import REPLExecutor, REPLError
-from .prompts import build_system_prompt
+from .prompts import build_system_prompt, build_rag_system_prompt
 from .parser import parse_response, is_final
 
 
@@ -40,6 +40,8 @@ class RLM:
         max_depth: int = 5,
         max_iterations: int = 30,
         _current_depth: int = 0,
+        rag_store: Any = None,
+        ai_name: str = "AI",
         **llm_kwargs: Any
     ):
         """
@@ -53,6 +55,8 @@ class RLM:
             max_depth: Maximum recursion depth
             max_iterations: Maximum REPL iterations per call
             _current_depth: Internal current depth tracker
+            rag_store: Optional AIRAGStore for knowledge base access
+            ai_name: Name of the AI personality
             **llm_kwargs: Additional LiteLLM parameters
         """
         self.model = model
@@ -63,6 +67,8 @@ class RLM:
         self.max_iterations = max_iterations
         self._current_depth = _current_depth
         self.llm_kwargs = llm_kwargs
+        self.rag_store = rag_store
+        self.ai_name = ai_name
 
         self.repl = REPLExecutor()
 
@@ -145,8 +151,18 @@ class RLM:
         # Initialize REPL environment
         repl_env = self._build_repl_env(query, context)
 
-        # Build initial messages
-        system_prompt = build_system_prompt(len(context), self._current_depth)
+        # Build initial messages with RAG-aware prompt if RAG store is available
+        if self.rag_store:
+            rag_stats = self.rag_store.get_stats()
+            system_prompt = build_rag_system_prompt(
+                len(context), 
+                self._current_depth,
+                rag_stats.to_dict() if hasattr(rag_stats, 'to_dict') else rag_stats,
+                self.ai_name
+            )
+        else:
+            system_prompt = build_system_prompt(len(context), self._current_depth)
+        
         messages: List[Message] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": query}
@@ -238,7 +254,60 @@ class RLM:
             'recursive_llm': self._make_recursive_fn(),
             're': re,  # Whitelist re module
         }
+        
+        # Add RAG functions if store is available
+        if self.rag_store:
+            env.update(self._make_rag_functions())
+        
         return env
+
+    def _make_rag_functions(self) -> Dict[str, Callable]:
+        """
+        Create RAG functions for REPL environment.
+
+        Returns:
+            Dictionary of RAG functions
+        """
+        store = self.rag_store
+        
+        def search_knowledge(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+            """Search the knowledge base for relevant information."""
+            results = store.retrieve(query, top_k=top_k)
+            return [
+                {
+                    "content": r.chunk.content,
+                    "source": r.chunk.source,
+                    "type": r.chunk.source_type,
+                    "score": r.score
+                }
+                for r in results
+            ]
+        
+        def add_memory(content: str, importance: float = 0.5) -> str:
+            """Add a memory to the knowledge base."""
+            chunk_id = store.add_memory(content, importance=importance)
+            return f"Memory stored with ID: {chunk_id}"
+        
+        def add_knowledge(fact: str, category: str = "general") -> str:
+            """Add a knowledge fact to the store."""
+            chunk_id = store.add_knowledge(fact, category=category)
+            return f"Knowledge stored with ID: {chunk_id}"
+        
+        def get_context(query: str, max_tokens: int = 2000) -> str:
+            """Get relevant context for a query."""
+            return store.get_context(query, max_tokens=max_tokens)
+        
+        def index_document(content: str, source_name: str) -> List[str]:
+            """Index a document for future retrieval."""
+            return store.add_document(content, source_name)
+        
+        return {
+            'search_knowledge': search_knowledge,
+            'add_memory': add_memory,
+            'add_knowledge': add_knowledge,
+            'get_context': get_context,
+            'index_document': index_document,
+        }
 
     def _make_recursive_fn(self) -> Any:
         """
@@ -270,6 +339,8 @@ class RLM:
                 max_depth=self.max_depth,
                 max_iterations=self.max_iterations,
                 _current_depth=self._current_depth + 1,
+                rag_store=self.rag_store,  # Pass RAG store to sub-RLM
+                ai_name=self.ai_name,
                 **self.llm_kwargs
             )
 

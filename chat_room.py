@@ -58,24 +58,34 @@ from ai_state import (
 )
 
 
-# Supported document types
-SUPPORTED_EXTENSIONS = {
-    '.txt': 'text/plain',
-    '.md': 'text/markdown',
-    '.json': 'application/json',
-    '.csv': 'text/csv',
-    '.xml': 'text/xml',
-    '.html': 'text/html',
-    '.py': 'text/x-python',
-    '.js': 'text/javascript',
-    '.ts': 'text/typescript',
-    '.yaml': 'text/yaml',
-    '.yml': 'text/yaml',
-    '.log': 'text/plain',
-    '.ini': 'text/plain',
-    '.cfg': 'text/plain',
-    '.conf': 'text/plain',
-}
+# Import document reader for multi-format support
+try:
+    from document_reader import (
+        read_document, DocumentContent, 
+        SUPPORTED_EXTENSIONS, get_supported_extensions,
+        get_supported_formats, check_dependencies, get_missing_dependencies
+    )
+    DOCUMENT_READER_AVAILABLE = True
+except ImportError:
+    DOCUMENT_READER_AVAILABLE = False
+    # Fallback to basic supported extensions
+    SUPPORTED_EXTENSIONS = {
+        '.txt': 'text/plain',
+        '.md': 'text/markdown',
+        '.json': 'application/json',
+        '.csv': 'text/csv',
+        '.xml': 'text/xml',
+        '.html': 'text/html',
+        '.py': 'text/x-python',
+        '.js': 'text/javascript',
+        '.ts': 'text/typescript',
+        '.yaml': 'text/yaml',
+        '.yml': 'text/yaml',
+        '.log': 'text/plain',
+        '.ini': 'text/plain',
+        '.cfg': 'text/plain',
+        '.conf': 'text/plain',
+    }
 
 
 @dataclass
@@ -87,10 +97,23 @@ class Document:
     size: int
     mime_type: str
     uploaded_at: datetime = field(default_factory=datetime.now)
+    title: Optional[str] = None
+    author: Optional[str] = None
+    pages: int = 1
+    word_count: int = 0
+    original_format: str = "text"
+    source_type: str = "file"  # file, url
+    metadata: Dict[str, Any] = field(default_factory=dict)
     
     def __str__(self) -> str:
         size_kb = self.size / 1024
-        return f"📄 {self.name} ({size_kb:.1f} KB)"
+        info = f"📄 {self.name} ({size_kb:.1f} KB"
+        if self.pages > 1:
+            info += f", {self.pages} pages"
+        if self.word_count > 0:
+            info += f", {self.word_count:,} words"
+        info += ")"
+        return info
     
     def get_summary(self, max_chars: int = 200) -> str:
         """Get a summary of the document content."""
@@ -111,6 +134,16 @@ class ChatMessage:
         return f"[{time_str}] {self.sender}: {self.content}"
 
 
+# Import RAG after other imports to avoid circular dependency
+try:
+    from rag import AIRAGStore, RAGManager, get_rag_manager, initialize_rag_manager
+    RAG_AVAILABLE = True
+except ImportError:
+    RAG_AVAILABLE = False
+    AIRAGStore = None
+    RAGManager = None
+
+
 @dataclass
 class AIParticipant:
     """Represents an AI participant in the chat room."""
@@ -122,6 +155,7 @@ class AIParticipant:
     display_name: str = None  # Customizable display name
     avatar: str = "🤖"
     state: Optional[AIState] = None  # Persistent state
+    rag_store: Optional[Any] = None  # Private RAG/knowledge store
     
     def __post_init__(self):
         """Initialize the RLM instance for this AI."""
@@ -136,11 +170,22 @@ class AIParticipant:
         api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
         api_base = os.getenv("OLLAMA_API_BASE", "http://localhost:11434")
         
+        # Initialize RAG store for this AI (10M+ token private knowledge base)
+        if RAG_AVAILABLE:
+            try:
+                rag_manager = get_rag_manager()
+                self.rag_store = rag_manager.get_store(self.ai_id)
+            except Exception as e:
+                print(f"Warning: Could not initialize RAG store for {self.ai_id}: {e}")
+                self.rag_store = None
+        
         # Configure for Pixel TPU optimization
         rlm_kwargs = {
             "model": self.model,
             "max_iterations": 15,
             "temperature": 0.7,  # Slightly lower for more consistent responses
+            "rag_store": self.rag_store,  # Pass RAG store to RLM
+            "ai_name": self.display_name or self.name,
         }
         
         # Add API key only if using cloud models
@@ -158,10 +203,47 @@ class AIParticipant:
         self.display_name = new_name
         if self.state:
             self.state.rename(new_name)
+        # Update RLM's ai_name
+        if self.rlm:
+            self.rlm.ai_name = new_name
     
     def get_display_name(self) -> str:
         """Get the display name with avatar."""
         return f"{self.avatar} {self.display_name}"
+    
+    def get_rag_stats(self) -> Optional[Dict[str, Any]]:
+        """Get statistics about this AI's RAG knowledge base."""
+        if self.rag_store:
+            stats = self.rag_store.get_stats()
+            return stats.to_dict() if hasattr(stats, 'to_dict') else stats
+        return None
+    
+    def add_to_knowledge(self, content: str, source: str = "user") -> Optional[str]:
+        """Add content to this AI's knowledge base."""
+        if self.rag_store:
+            return self.rag_store.add_memory(content, source=source, importance=0.7)
+        return None
+    
+    def search_knowledge(self, query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Search this AI's knowledge base."""
+        if self.rag_store:
+            results = self.rag_store.retrieve(query, top_k=top_k)
+            return [
+                {
+                    "content": r.chunk.content,
+                    "source": r.chunk.source,
+                    "type": r.chunk.source_type,
+                    "score": r.score
+                }
+                for r in results
+            ]
+        return []
+    
+    def index_document(self, content: str, source_name: str) -> List[str]:
+        """Index a document into this AI's knowledge base."""
+        if self.rag_store:
+            return self.rag_store.add_document(content, source_name)
+        return []
 
 
 class AIChatRoom:
@@ -581,30 +663,127 @@ Respond privately to {from_participant}. Be personal and direct."""
         msg = ChatMessage(sender="System", content=content)
         self.messages.append(msg)
     
-    def upload_document(self, file_path: str) -> Optional[Document]:
+    def upload_document(self, file_path: str, index_for_ais: bool = True) -> Optional[Document]:
         """
         Upload a document to the chat room for AI processing.
         
+        Supports multiple formats:
+        - Text: .txt, .md, .csv, .json, .xml, .yaml, etc.
+        - Code: .py, .js, .ts, .java, .go, .rs, etc.
+        - Documents: .pdf, .docx, .doc, .odt, .rtf
+        - E-books: .epub
+        - Web: .html, http://, https:// URLs
+        
         Args:
-            file_path: Path to the document file
+            file_path: Path to the document file or URL
+            index_for_ais: Whether to index the document in each AI's RAG store
             
         Returns:
             Document object if successful, None otherwise
         """
-        path = Path(file_path).expanduser().resolve()
+        # Check if it's a URL
+        is_url = file_path.startswith('http://') or file_path.startswith('https://')
         
-        if not path.exists():
-            print(f"❌ File not found: {file_path}")
-            return None
+        if not is_url:
+            path = Path(file_path).expanduser().resolve()
+            
+            if not path.exists():
+                print(f"❌ File not found: {file_path}")
+                return None
+            
+            if not path.is_file():
+                print(f"❌ Not a file: {file_path}")
+                return None
         
-        if not path.is_file():
-            print(f"❌ Not a file: {file_path}")
-            return None
+        # Use advanced document reader if available
+        if DOCUMENT_READER_AVAILABLE:
+            try:
+                doc_content = read_document(file_path)
+                
+                # Create Document from DocumentContent
+                if is_url:
+                    name = doc_content.title or file_path.split('/')[-1] or "web_page"
+                    doc_path = file_path
+                    mime_type = "text/html"
+                else:
+                    name = path.name
+                    doc_path = str(path)
+                    ext = path.suffix.lower()
+                    mime_type = SUPPORTED_EXTENSIONS.get(ext, 'application/octet-stream')
+                
+                doc = Document(
+                    name=name,
+                    content=doc_content.text,
+                    path=doc_path,
+                    size=len(doc_content.text),
+                    mime_type=mime_type,
+                    title=doc_content.title,
+                    author=doc_content.author,
+                    pages=doc_content.pages,
+                    word_count=doc_content.word_count,
+                    original_format=doc_content.original_format,
+                    source_type=doc_content.source_type,
+                    metadata=doc_content.metadata
+                )
+                
+            except ImportError as e:
+                print(f"⚠️ {e}")
+                print("   Falling back to basic text reading...")
+                # Fall through to basic reading
+                if is_url:
+                    print(f"❌ URL reading requires document_reader module")
+                    return None
+                doc = self._read_basic_document(path)
+                if doc is None:
+                    return None
+                    
+            except Exception as e:
+                print(f"❌ Error reading document: {e}")
+                return None
+        else:
+            # Basic reading for plain text files only
+            if is_url:
+                print(f"❌ URL reading requires document_reader module")
+                return None
+            doc = self._read_basic_document(path)
+            if doc is None:
+                return None
         
+        self.documents[doc.name] = doc
+        self.active_document = doc.name
+        self._add_system_message(f"Document uploaded: {doc}")
+        
+        # Index document in each AI's RAG store for their 10M+ context database
+        if index_for_ais and RAG_AVAILABLE:
+            indexed_count = 0
+            for ai_id, participant in self.participants.items():
+                if participant.rag_store:
+                    try:
+                        chunk_ids = participant.index_document(doc.content, doc.name)
+                        if chunk_ids:
+                            indexed_count += 1
+                    except Exception as e:
+                        print(f"Warning: Could not index document for {ai_id}: {e}")
+            
+            if indexed_count > 0:
+                self._add_system_message(f"📚 Document indexed in {indexed_count} AI knowledge base(s)")
+        
+        return doc
+    
+    def _read_basic_document(self, path: Path) -> Optional[Document]:
+        """
+        Basic document reading for plain text files.
+        
+        Args:
+            path: Path to the file
+            
+        Returns:
+            Document if successful, None otherwise
+        """
         ext = path.suffix.lower()
         if ext not in SUPPORTED_EXTENSIONS:
             print(f"❌ Unsupported file type: {ext}")
-            print(f"   Supported types: {', '.join(SUPPORTED_EXTENSIONS.keys())}")
+            print(f"   Supported types: {', '.join(sorted(SUPPORTED_EXTENSIONS.keys()))}")
             return None
         
         try:
@@ -619,19 +798,15 @@ Respond privately to {from_participant}. Be personal and direct."""
             print(f"❌ Error reading file: {e}")
             return None
         
-        doc = Document(
+        return Document(
             name=path.name,
             content=content,
             path=str(path),
             size=len(content),
-            mime_type=SUPPORTED_EXTENSIONS[ext]
+            mime_type=SUPPORTED_EXTENSIONS[ext],
+            word_count=len(content.split()),
+            original_format=ext
         )
-        
-        self.documents[doc.name] = doc
-        self.active_document = doc.name
-        self._add_system_message(f"Document uploaded: {doc}")
-        
-        return doc
     
     def list_documents(self) -> List[Document]:
         """List all uploaded documents."""

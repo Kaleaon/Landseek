@@ -8,6 +8,7 @@ A conversational AI chat room application powered by [Recursive Language Models 
 - ✏️ **Customizable Names**: Rename any AI personality to your preference
 - 🔒 **Private Conversations**: Private 1-on-1 chats between any participants (User-to-AI, AI-to-AI)
 - 💾 **Persistent State**: Chat history, emotions, and relationships saved to Documents folder
+- 🧠 **10M+ Token RAG**: Each AI has private RAG storage for massive context (based on RLM recursive approach)
 - 🌐 **P2P Networking**: Share your LLM capabilities with others via share codes - no server required!
 - 🚀 **Gemma 3 4B Powered**: Optimized for Google Pixel TPU acceleration
 - 📱 **Full Android GUI**: Complete Kivy-based Android app with modern Material Design UI
@@ -17,6 +18,112 @@ A conversational AI chat room application powered by [Recursive Language Models 
 - 🔄 **Recursive Context**: Uses RLM for intelligent context processing
 - 🏠 **Local First**: Runs fully on-device - no cloud required
 - 💾 **Lightweight**: ~4GB model size, efficient memory usage
+
+## RAG (Retrieval Augmented Generation) System
+
+Each AI personality has its own **private 10M+ token knowledge base** powered by the RLM approach:
+
+### How It Works (Based on recursive-llm)
+
+1. **Context stored as variable**: Instead of putting huge documents in the prompt, context is stored in a Python REPL environment
+2. **Recursive exploration**: AI can peek, search, and recursively process sub-contexts
+3. **No context rot**: Avoids performance degradation with long contexts
+4. **Per-AI isolation**: Each personality maintains their own memories and knowledge
+
+### RAG Functions Available to AI
+
+When responding, each AI can use these functions in their REPL environment:
+
+```python
+# Search the AI's knowledge base
+results = search_knowledge("user preferences", top_k=5)
+
+# Add a memory for later recall  
+add_memory("User prefers formal language", importance=0.9)
+
+# Add a knowledge fact
+add_knowledge("Python was created in 1991", category="history")
+
+# Get relevant context for a query
+context = get_context("previous discussions about AI", max_tokens=2000)
+
+# Index a document for future retrieval
+index_document(document_content, "research_paper.pdf")
+
+# Recursively process sub-context
+recursive_llm("summarize this section", context[1000:5000])
+```
+
+### Storage
+
+All RAG data is stored in `Documents/AIChat/rag/{ai_id}/`:
+- `chunks.json` - Text chunks with embeddings
+- `keyword_index.json` - Inverted index for fast keyword search
+- `stats.json` - Statistics about the knowledge base
+- `vocab.json` - Embedding vocabulary
+
+## Supported File Formats (70+)
+
+Gemma 3 4B is multimodal and the app supports extensive file format handling:
+
+### 📝 Text & Code
+| Category | Extensions |
+|----------|------------|
+| Text | `.txt`, `.md`, `.markdown`, `.rst` |
+| Data | `.json`, `.csv`, `.tsv`, `.xml`, `.yaml`, `.yml`, `.toml` |
+| Code | `.py`, `.js`, `.ts`, `.jsx`, `.tsx`, `.java`, `.c`, `.cpp`, `.h`, `.go`, `.rs`, `.rb`, `.php`, `.swift`, `.kt`, `.scala`, `.sql`, `.sh`, `.bash`, `.lua`, `.pl`, `.dart` |
+| Config | `.ini`, `.cfg`, `.conf`, `.log` |
+
+### 📄 Documents
+| Format | Extensions | Library Needed |
+|--------|------------|----------------|
+| PDF | `.pdf` | `pymupdf` or `pypdf` or `pdfplumber` |
+| Word | `.docx`, `.doc` | `python-docx` |
+| OpenDocument | `.odt` | `odfpy` |
+| Rich Text | `.rtf` | `striprtf` |
+| E-books | `.epub` | `ebooklib` |
+
+### 🖼️ Images (Gemma 3 Multimodal)
+| Extensions | Notes |
+|------------|-------|
+| `.jpg`, `.jpeg`, `.png` | **Native Gemma 3 support** - normalized to 896x896 |
+| `.gif`, `.webp`, `.bmp`, `.tiff`, `.svg` | Converted/processed for vision |
+
+### 🎵 Audio & 🎬 Video
+| Category | Extensions | Notes |
+|----------|------------|-------|
+| Audio | `.mp3`, `.wav`, `.ogg`, `.flac`, `.m4a`, `.aac` | Metadata extraction, transcription via Whisper |
+| Video | `.mp4`, `.webm`, `.mkv`, `.avi`, `.mov` | Metadata + key frame extraction |
+
+### 📊 Office & Archives
+| Category | Extensions | Library Needed |
+|----------|------------|----------------|
+| Spreadsheets | `.xlsx`, `.xls`, `.ods` | `pandas`, `openpyxl` |
+| Presentations | `.pptx`, `.ppt` | `python-pptx` |
+| Archives | `.zip`, `.tar`, `.gz`, `.7z` | Built-in |
+
+### 🌐 Web
+- URLs: `http://`, `https://` - Fetches and extracts text from web pages
+- HTML files: `.html`, `.htm`, `.xhtml`
+
+### Install Optional Dependencies
+
+```bash
+# PDF support (choose one)
+pip install pymupdf  # Recommended - fastest
+
+# Document formats
+pip install python-docx ebooklib striprtf odfpy
+
+# Spreadsheets and presentations
+pip install pandas openpyxl python-pptx
+
+# Audio/video metadata
+pip install mutagen opencv-python
+
+# Image processing
+pip install pillow
+```
 
 ## Quick Start
 

@@ -62,15 +62,25 @@ class MessageType(Enum):
     CHAT_MESSAGE = "chat_message"
     AI_REQUEST = "ai_request"
     AI_RESPONSE = "ai_response"
+    PRIVATE_MESSAGE = "private_message"
     
     # Room management
     ROOM_INFO = "room_info"
     PEER_JOINED = "peer_joined"
     PEER_LEFT = "peer_left"
     
-    # Sync
+    # Sync - Bidirectional data synchronization
     SYNC_MESSAGES = "sync_messages"
     SYNC_PARTICIPANTS = "sync_participants"
+    SYNC_AI_STATE = "sync_ai_state"
+    SYNC_MEMORIES = "sync_memories"
+    SYNC_REQUEST = "sync_request"  # Request data from peer
+    SYNC_RESPONSE = "sync_response"  # Response with data
+    
+    # Local storage events (for bidirectional storage)
+    STORE_INTERACTION = "store_interaction"
+    STORE_AI_MEMORY = "store_ai_memory"
+    STORE_RELATIONSHIP = "store_relationship"
     
     # Errors
     ERROR = "error"
@@ -212,6 +222,30 @@ class P2PHandler(ABC):
     @abstractmethod
     def on_error(self, error: str) -> None:
         """Called when an error occurs."""
+        pass
+    
+    # Local storage callbacks (optional - for bidirectional data sync)
+    def on_store_interaction(self, interaction_data: Dict[str, Any]) -> None:
+        """Called when an interaction should be stored locally (from remote)."""
+        pass
+    
+    def on_store_ai_memory(self, ai_id: str, memory_data: Dict[str, Any]) -> None:
+        """Called when an AI memory should be stored locally (from remote)."""
+        pass
+    
+    def on_store_relationship(self, ai_id: str, relationship_data: Dict[str, Any]) -> None:
+        """Called when a relationship should be stored locally (from remote)."""
+        pass
+    
+    def on_sync_request(self, sync_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Called when a peer requests data synchronization."""
+        return {}
+    
+    def on_private_message(
+        self, sender_id: str, sender_name: str, 
+        recipient_id: str, content: str
+    ) -> None:
+        """Called when a private message is received."""
         pass
 
 
@@ -438,6 +472,19 @@ class P2PServer:
             # Relay to other peers
             self.broadcast(message, exclude={peer_id})
             
+        elif message.type == MessageType.PRIVATE_MESSAGE:
+            # Handle private messages
+            self.handler.on_private_message(
+                peer_id,
+                message.payload.get("sender_name", "Unknown"),
+                message.payload.get("recipient_id", ""),
+                message.payload.get("content", "")
+            )
+            # Relay to recipient if they're connected
+            recipient_id = message.payload.get("recipient_id", "")
+            if recipient_id in self.peers:
+                self._send_to_peer(recipient_id, message)
+            
         elif message.type == MessageType.AI_REQUEST:
             self.handler.on_ai_request(
                 message.payload.get("request_id", ""),
@@ -445,10 +492,79 @@ class P2PServer:
                 message.payload.get("ai_name", ""),
                 message.payload.get("prompt", "")
             )
+        
+        # Local storage synchronization - store data on both host and client
+        elif message.type == MessageType.STORE_INTERACTION:
+            # Store the interaction locally (host storing client's interaction)
+            self.handler.on_store_interaction(message.payload)
+            
+        elif message.type == MessageType.STORE_AI_MEMORY:
+            # Store AI memory locally
+            self.handler.on_store_ai_memory(
+                message.payload.get("ai_id", ""),
+                message.payload
+            )
+            
+        elif message.type == MessageType.STORE_RELATIONSHIP:
+            # Store relationship update locally
+            self.handler.on_store_relationship(
+                message.payload.get("ai_id", ""),
+                message.payload
+            )
+            
+        elif message.type == MessageType.SYNC_REQUEST:
+            # Peer is requesting data sync
+            sync_type = message.payload.get("sync_type", "")
+            params = message.payload.get("params", {})
+            response_data = self.handler.on_sync_request(sync_type, params)
+            
+            # Send response
+            response = P2PMessage(
+                type=MessageType.SYNC_RESPONSE,
+                sender_id=self.peer_id,
+                payload={
+                    "sync_type": sync_type,
+                    "request_id": message.payload.get("request_id", ""),
+                    "data": response_data
+                }
+            )
+            self._send_to_peer(peer_id, response)
             
         elif message.type == MessageType.DISCONNECT:
             # Will be handled in finally block
             pass
+    
+    def send_to_all_for_storage(self, interaction_data: Dict[str, Any]) -> None:
+        """
+        Send interaction data to all peers so they can store it locally.
+        This ensures bidirectional storage - both host and clients store data.
+        """
+        message = P2PMessage(
+            type=MessageType.STORE_INTERACTION,
+            sender_id=self.peer_id,
+            payload=interaction_data
+        )
+        self.broadcast(message)
+    
+    def send_ai_memory_to_all(self, ai_id: str, memory_data: Dict[str, Any]) -> None:
+        """Send AI memory to all peers for local storage."""
+        memory_data["ai_id"] = ai_id
+        message = P2PMessage(
+            type=MessageType.STORE_AI_MEMORY,
+            sender_id=self.peer_id,
+            payload=memory_data
+        )
+        self.broadcast(message)
+    
+    def send_relationship_to_all(self, ai_id: str, relationship_data: Dict[str, Any]) -> None:
+        """Send relationship update to all peers for local storage."""
+        relationship_data["ai_id"] = ai_id
+        message = P2PMessage(
+            type=MessageType.STORE_RELATIONSHIP,
+            sender_id=self.peer_id,
+            payload=relationship_data
+        )
+        self.broadcast(message)
     
     def _send_to_peer(self, peer_id: str, message: P2PMessage) -> bool:
         """Send a message to a specific peer."""
@@ -725,6 +841,116 @@ class P2PClient:
             
         elif message.type == MessageType.DISCONNECT:
             self.running = False
+        
+        # Bidirectional storage - handle data from host to store locally
+        elif message.type == MessageType.STORE_INTERACTION:
+            # Store the interaction locally (client storing host's data)
+            self.handler.on_store_interaction(message.payload)
+            
+        elif message.type == MessageType.STORE_AI_MEMORY:
+            # Store AI memory locally
+            self.handler.on_store_ai_memory(
+                message.payload.get("ai_id", ""),
+                message.payload
+            )
+            
+        elif message.type == MessageType.STORE_RELATIONSHIP:
+            # Store relationship update locally
+            self.handler.on_store_relationship(
+                message.payload.get("ai_id", ""),
+                message.payload
+            )
+            
+        elif message.type == MessageType.PRIVATE_MESSAGE:
+            # Handle private message
+            self.handler.on_private_message(
+                message.payload.get("sender_id", message.sender_id),
+                message.payload.get("sender_name", "Unknown"),
+                message.payload.get("recipient_id", ""),
+                message.payload.get("content", "")
+            )
+            
+        elif message.type == MessageType.SYNC_RESPONSE:
+            # Handle sync response
+            request_id = message.payload.get("request_id", "")
+            if request_id in self._pending_requests:
+                self._responses[request_id] = message.payload.get("data", {})
+                self._pending_requests[request_id].set()
+    
+    def send_for_storage(self, interaction_data: Dict[str, Any]) -> None:
+        """
+        Send interaction data to host for storage.
+        This ensures bidirectional storage - both host and client store data.
+        """
+        message = P2PMessage(
+            type=MessageType.STORE_INTERACTION,
+            sender_id=self.peer_id,
+            payload=interaction_data
+        )
+        self._send_message(message.to_json())
+    
+    def send_ai_memory_to_host(self, ai_id: str, memory_data: Dict[str, Any]) -> None:
+        """Send AI memory to host for storage."""
+        memory_data["ai_id"] = ai_id
+        message = P2PMessage(
+            type=MessageType.STORE_AI_MEMORY,
+            sender_id=self.peer_id,
+            payload=memory_data
+        )
+        self._send_message(message.to_json())
+    
+    def send_private_message(
+        self, 
+        recipient_id: str, 
+        content: str
+    ) -> None:
+        """Send a private message to another participant."""
+        message = P2PMessage(
+            type=MessageType.PRIVATE_MESSAGE,
+            sender_id=self.peer_id,
+            payload={
+                "sender_name": self.name,
+                "recipient_id": recipient_id,
+                "content": content
+            }
+        )
+        self._send_message(message.to_json())
+    
+    def request_sync(self, sync_type: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Request data synchronization from the host.
+        
+        Args:
+            sync_type: Type of data to sync (e.g., "ai_history", "memories")
+            params: Parameters for the sync request
+            
+        Returns:
+            The synchronized data
+        """
+        request_id = str(uuid.uuid4())
+        
+        message = P2PMessage(
+            type=MessageType.SYNC_REQUEST,
+            sender_id=self.peer_id,
+            payload={
+                "request_id": request_id,
+                "sync_type": sync_type,
+                "params": params or {}
+            }
+        )
+        self._send_message(message.to_json())
+        
+        # Wait for response
+        event = threading.Event()
+        self._pending_requests[request_id] = event
+        
+        if event.wait(timeout=30):
+            response = self._responses.pop(request_id, {})
+            self._pending_requests.pop(request_id, None)
+            return response
+        else:
+            self._pending_requests.pop(request_id, None)
+            return {}
     
     def _send_message(self, data: str) -> None:
         """Send a length-prefixed message."""

@@ -62,6 +62,82 @@ All RAG data is stored in `Documents/AIChat/rag/{ai_id}/`:
 - `stats.json` - Statistics about the knowledge base
 - `vocab.json` - Embedding vocabulary
 
+## 💾 Local Storage (Bidirectional)
+
+**ALL data is stored locally on your device**, including:
+- Chat histories (group and private)
+- AI memories and emotions
+- Relationships and interactions
+- Remote session data
+- Document uploads
+
+### Bidirectional P2P Storage
+
+When you connect to a remote P2P session, **both devices store the conversation data**:
+
+1. **Host Device**: Stores all messages from all participants
+2. **Client Device**: Also stores the same data locally
+
+This means:
+- You always have your conversation history, even after disconnecting
+- No dependency on the host to access your chat data
+- Complete offline access to all your AI interactions
+
+### Storage Locations
+
+All data is stored in the public Documents folder for easy backup:
+
+```
+Documents/AIChat/
+├── local_storage.db          # SQLite database for efficient queries
+├── ai_states/                # AI personality states
+│   ├── nova.json
+│   ├── echo.json
+│   └── ...
+├── private_chats/            # Private conversations
+│   ├── user__nova.json
+│   └── ...
+├── remote_sessions/          # P2P session records
+│   ├── session-abc123.json
+│   └── ...
+├── rag/                      # Per-AI RAG knowledge bases
+│   ├── nova/
+│   ├── echo/
+│   └── ...
+├── documents/                # Uploaded documents
+├── backups/                  # Database backups
+└── exports/                  # Data exports
+```
+
+### Data Stored Per Interaction
+
+Each interaction stores:
+- Timestamp
+- Session ID and type (local/remote)
+- Sender info (ID, name, type)
+- Message content and type
+- AI ID (if applicable)
+- Private chat partner (if private)
+- Tool calls made
+- Remote session info (if in P2P mode)
+
+### Export and Backup
+
+```python
+from src.local_storage import get_local_storage
+
+storage = get_local_storage()
+
+# Export all data to JSON
+export_path = storage.export_all_data()
+
+# Create database backup
+backup_path = storage.backup_database()
+
+# Get storage statistics
+stats = storage.get_storage_stats()
+```
+
 ## Supported File Formats (70+)
 
 Gemma 3 4B is multimodal and the app supports extensive file format handling:

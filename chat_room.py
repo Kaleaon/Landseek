@@ -41,6 +41,16 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from rlm import RLM
 from tools import tool_registry, parse_tool_call, get_tools_description, ToolResult
 from addons import addon_manager, get_addon_manager
+from personalities import (
+    PersonalityManager, PersonalityDefinition, 
+    get_personality_manager, get_default_personalities,
+    BUILTIN_PERSONALITIES, MAX_PERSONALITIES
+)
+from p2p import (
+    P2PServer, P2PClient, P2PHandler, PeerInfo, PeerRole,
+    generate_room_code, encode_connection_info, decode_connection_info,
+    get_local_ip, SimpleP2PHandler
+)
 
 
 # Supported document types
@@ -138,14 +148,22 @@ class AIChatRoom:
     powered by different models.
     
     Features:
-    - Multi-AI conversations
+    - Multi-AI conversations (up to 10 personalities)
     - Document upload and processing
     - Tool use capabilities
     - Add-on/plugin support
+    - P2P networking for sharing LLM capabilities
     - Optimized for local execution on Pixel 10 Pro with Gemma models
     """
     
-    def __init__(self, name: str = "AI Chat Room", enable_tools: bool = True, enable_addons: bool = True):
+    def __init__(
+        self, 
+        name: str = "AI Chat Room", 
+        enable_tools: bool = True, 
+        enable_addons: bool = True,
+        enable_p2p: bool = False,
+        max_personalities: int = MAX_PERSONALITIES
+    ):
         """
         Initialize the chat room.
         
@@ -153,6 +171,8 @@ class AIChatRoom:
             name: Name of the chat room
             enable_tools: Whether to enable AI tool use
             enable_addons: Whether to enable add-ons
+            enable_p2p: Whether to enable P2P networking
+            max_personalities: Maximum number of AI personalities (up to 10)
         """
         self.name = name
         self.messages: List[ChatMessage] = []
@@ -162,23 +182,147 @@ class AIChatRoom:
         self.context_window_size = 10  # Number of messages to include in context
         self.enable_tools = enable_tools  # Enable tool use
         self.enable_addons = enable_addons  # Enable add-ons
+        self.enable_p2p = enable_p2p  # Enable P2P networking
+        self.max_personalities = min(max_personalities, MAX_PERSONALITIES)
         self.addon_manager = get_addon_manager() if enable_addons else None
+        self.personality_manager = get_personality_manager()
+        
+        # P2P networking
+        self.p2p_server: Optional[P2PServer] = None
+        self.p2p_client: Optional[P2PClient] = None
+        self.p2p_mode: Optional[str] = None  # "host" or "client"
+        self.connected_peers: Dict[str, PeerInfo] = {}
         
         # Load add-ons
         if self.addon_manager:
             count = self.addon_manager.load_all()
             if count > 0:
                 self._add_system_message(f"Loaded {count} add-on(s)")
+    
+    def start_hosting(self, port: int = 8765) -> Optional[str]:
+        """
+        Start hosting a P2P chat room.
         
-    def add_participant(self, participant: AIParticipant) -> None:
+        Args:
+            port: Port to listen on
+            
+        Returns:
+            Share code for others to join, or None if failed
+        """
+        if self.p2p_mode:
+            return None  # Already in P2P mode
+        
+        handler = ChatRoomP2PHandler(self)
+        self.p2p_server = P2PServer(
+            handler=handler,
+            port=port,
+            room_name=self.name
+        )
+        
+        try:
+            self.p2p_server.start()
+            self.p2p_mode = "host"
+            share_code = self.p2p_server.get_share_code()
+            self._add_system_message(f"🌐 Room is now shared! Share code: {share_code}")
+            return share_code
+        except Exception as e:
+            self._add_system_message(f"Failed to start hosting: {e}")
+            self.p2p_server = None
+            return None
+    
+    def stop_hosting(self) -> None:
+        """Stop hosting the P2P chat room."""
+        if self.p2p_server:
+            self.p2p_server.stop()
+            self.p2p_server = None
+            self.p2p_mode = None
+            self.connected_peers.clear()
+            self._add_system_message("🔌 Room sharing stopped.")
+    
+    def join_room(self, share_code: str, name: str = "Guest") -> bool:
+        """
+        Join a remote P2P chat room.
+        
+        Args:
+            share_code: The share code from the host
+            name: Your display name
+            
+        Returns:
+            True if connected successfully
+        """
+        if self.p2p_mode:
+            return False  # Already in P2P mode
+        
+        handler = ChatRoomP2PHandler(self)
+        self.p2p_client = P2PClient(handler=handler, name=name)
+        
+        if self.p2p_client.connect(share_code):
+            self.p2p_mode = "client"
+            self._add_system_message(f"🌐 Connected to remote room!")
+            return True
+        else:
+            self.p2p_client = None
+            return False
+    
+    def leave_room(self) -> None:
+        """Leave the current P2P room."""
+        if self.p2p_client:
+            self.p2p_client.disconnect()
+            self.p2p_client = None
+            self.p2p_mode = None
+            self.connected_peers.clear()
+            self._add_system_message("🔌 Disconnected from room.")
+    
+    def get_share_code(self, use_public_ip: bool = False) -> Optional[str]:
+        """Get the share code for this room (host only)."""
+        if self.p2p_server:
+            return self.p2p_server.get_share_code(use_public_ip)
+        return None
+    
+    def is_host(self) -> bool:
+        """Check if this is the host."""
+        return self.p2p_mode == "host"
+    
+    def is_client(self) -> bool:
+        """Check if this is a client."""
+        return self.p2p_mode == "client"
+    
+    def get_peer_count(self) -> int:
+        """Get the number of connected peers."""
+        return len(self.connected_peers)
+        
+    def add_participant(self, participant: AIParticipant) -> bool:
         """
         Add an AI participant to the chat room.
         
         Args:
             participant: The AI participant to add
+            
+        Returns:
+            True if added, False if at max capacity
         """
+        if len(self.participants) >= self.max_personalities:
+            self._add_system_message(f"Cannot add {participant.name}: Maximum {self.max_personalities} personalities reached.")
+            return False
         self.participants[participant.name] = participant
         self._add_system_message(f"{participant.name} has joined the chat.")
+        return True
+    
+    def remove_participant(self, name: str) -> bool:
+        """
+        Remove an AI participant from the chat room.
+        
+        Args:
+            name: Name of the participant to remove
+            
+        Returns:
+            True if removed, False if not found
+        """
+        if name in self.participants:
+            del self.participants[name]
+            self._add_system_message(f"{name} has left the chat.")
+            return True
+        return False
         
     def _add_system_message(self, content: str) -> None:
         """Add a system notification message."""
@@ -519,6 +663,81 @@ def create_default_participants(model: str = "ollama/gemma3:4b") -> List[AIParti
     ]
 
 
+def create_participants_from_personalities(
+    count: int = 3, 
+    model: str = "ollama/gemma3:4b"
+) -> List[AIParticipant]:
+    """
+    Create AI participants from the personality manager.
+    
+    Args:
+        count: Number of participants (1-10)
+        model: The model to use for all participants
+        
+    Returns:
+        List of AI participants
+    """
+    count = min(max(1, count), MAX_PERSONALITIES)
+    personalities = BUILTIN_PERSONALITIES[:count]
+    
+    return [
+        AIParticipant(
+            name=p.name,
+            personality=p.personality,
+            model=model
+        )
+        for p in personalities
+    ]
+
+
+class ChatRoomP2PHandler(P2PHandler):
+    """P2P handler that integrates with the chat room."""
+    
+    def __init__(self, chat_room: AIChatRoom):
+        self.chat_room = chat_room
+    
+    def on_peer_connected(self, peer: PeerInfo) -> None:
+        """Called when a peer connects."""
+        self.chat_room.connected_peers[peer.peer_id] = peer
+        self.chat_room._add_system_message(f"👤 {peer.name} joined the room")
+    
+    def on_peer_disconnected(self, peer: PeerInfo) -> None:
+        """Called when a peer disconnects."""
+        self.chat_room.connected_peers.pop(peer.peer_id, None)
+        self.chat_room._add_system_message(f"👤 {peer.name} left the room")
+    
+    def on_chat_message(self, sender_id: str, sender_name: str, content: str) -> None:
+        """Called when a chat message is received."""
+        msg = ChatMessage(sender=sender_name, content=content)
+        self.chat_room.messages.append(msg)
+        print(msg)
+    
+    def on_ai_request(self, request_id: str, sender_id: str, ai_name: str, prompt: str) -> None:
+        """Called when an AI request is received (host only)."""
+        if not self.chat_room.is_host():
+            return
+        
+        # Process AI request asynchronously
+        async def process_request():
+            response = await self.chat_room.get_ai_response(ai_name, prompt)
+            if response and self.chat_room.p2p_server:
+                self.chat_room.p2p_server.send_ai_response(
+                    request_id, ai_name, response.content, sender_id
+                )
+        
+        asyncio.create_task(process_request())
+    
+    def on_ai_response(self, request_id: str, ai_name: str, response: str) -> None:
+        """Called when an AI response is received (client only)."""
+        msg = ChatMessage(sender=ai_name, content=response)
+        self.chat_room.messages.append(msg)
+        print(msg)
+    
+    def on_error(self, error: str) -> None:
+        """Called when an error occurs."""
+        self.chat_room._add_system_message(f"⚠️ P2P Error: {error}")
+
+
 async def interactive_chat(chat_room: AIChatRoom) -> None:
     """
     Run an interactive chat session.
@@ -545,20 +764,36 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
     print("  /tools             - List available tools")
     print("  /tool <name> [args]    - Execute a tool directly")
     print("  /addons            - List and manage add-ons")
+    print("  /personalities     - List available AI personalities")
+    print("  /host [port]       - Start hosting (share LLMs with others)")
+    print("  /join <code>       - Join a room via share code")
+    print("  /share             - Get share code (if hosting)")
+    print("  /peers             - List connected peers")
+    print("  /disconnect        - Leave or stop hosting")
     print("  Type anything else to send a message")
     print(f"{'='*60}\n")
     
     while True:
         try:
-            # Show active document indicator
+            # Show active document indicator and P2P status
             doc = chat_room.get_active_document()
-            prompt = f"You [{doc.name}]: " if doc else "You: "
+            p2p_indicator = ""
+            if chat_room.is_host():
+                p2p_indicator = f"[🌐 Host: {chat_room.get_peer_count()} peers] "
+            elif chat_room.is_client():
+                p2p_indicator = "[🌐 Connected] "
+            
+            prompt = f"{p2p_indicator}You [{doc.name}]: " if doc else f"{p2p_indicator}You: "
             user_input = input(prompt).strip()
             
             if not user_input:
                 continue
                 
             if user_input.lower() == "/quit":
+                if chat_room.is_host():
+                    chat_room.stop_hosting()
+                elif chat_room.is_client():
+                    chat_room.leave_room()
                 print("\nGoodbye! Thanks for chatting.")
                 break
                 
@@ -569,6 +804,74 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
             
             if user_input.lower() == "/tools":
                 print(get_tools_description())
+                continue
+            
+            if user_input.lower() == "/personalities":
+                pm = get_personality_manager()
+                print(f"\n🎭 Available Personalities ({pm.count()}/{MAX_PERSONALITIES}):\n")
+                for p in pm.list_all():
+                    active = "✅" if p.name in chat_room.participants else "  "
+                    print(f"  {active} {p.avatar} {p.name}: {p.personality[:50]}...")
+                print(f"\nTags: {', '.join(set(tag for p in pm.list_all() for tag in p.tags))}")
+                print()
+                continue
+            
+            if user_input.lower().startswith("/host"):
+                parts = user_input.split()
+                port = int(parts[1]) if len(parts) > 1 else 8765
+                share_code = chat_room.start_hosting(port)
+                if share_code:
+                    print(f"\n🌐 Room is now shared!")
+                    print(f"   Share code (LAN): {share_code}")
+                    public_code = chat_room.get_share_code(use_public_ip=True)
+                    if public_code != share_code:
+                        print(f"   Share code (Internet): {public_code}")
+                    print(f"   Others can join with: /join <code>")
+                    print()
+                continue
+            
+            if user_input.lower().startswith("/join"):
+                parts = user_input.split(maxsplit=1)
+                if len(parts) < 2:
+                    print("Usage: /join <share_code>")
+                    continue
+                share_code = parts[1].strip()
+                name = input("Enter your name: ").strip() or "Guest"
+                if chat_room.join_room(share_code, name):
+                    print("✅ Connected to remote room!")
+                else:
+                    print("❌ Failed to connect. Check the share code.")
+                continue
+            
+            if user_input.lower() == "/share":
+                if chat_room.is_host():
+                    share_code = chat_room.get_share_code()
+                    print(f"\n🌐 Share code (LAN): {share_code}")
+                    public_code = chat_room.get_share_code(use_public_ip=True)
+                    if public_code != share_code:
+                        print(f"   Share code (Internet): {public_code}")
+                    print()
+                else:
+                    print("Not hosting. Use /host to start sharing.")
+                continue
+            
+            if user_input.lower() == "/peers":
+                if chat_room.p2p_mode:
+                    print(f"\n👥 Connected Peers ({chat_room.get_peer_count()}):")
+                    for peer_id, peer in chat_room.connected_peers.items():
+                        print(f"   • {peer.name} ({peer.role.value})")
+                    print()
+                else:
+                    print("Not in P2P mode. Use /host or /join first.")
+                continue
+            
+            if user_input.lower() == "/disconnect":
+                if chat_room.is_host():
+                    chat_room.stop_hosting()
+                elif chat_room.is_client():
+                    chat_room.leave_room()
+                else:
+                    print("Not connected to any room.")
                 continue
             
             if user_input.lower() == "/addons":

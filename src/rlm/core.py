@@ -1,6 +1,7 @@
 """Core RLM implementation."""
 
 import asyncio
+import concurrent.futures
 import re
 from typing import Optional, Dict, Any, List
 
@@ -282,7 +283,6 @@ class RLM:
                 loop = asyncio.get_running_loop()
                 # We're in async context, but REPL is sync
                 # Create a new thread to run async code
-                import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(
                         asyncio.run,

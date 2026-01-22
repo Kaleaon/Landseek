@@ -68,8 +68,8 @@ class REPLExecutor:
             output = captured_output.getvalue()
 
             # Get output from PrintCollector if available
-            if '_print' in env and hasattr(env['_print'], '__call__'):
-                # PrintCollector stores prints in its txt attribute
+            # RestrictedPython creates '_print' in local env from '_print_' factory
+            if '_print' in env:
                 print_collector = env['_print']
                 if hasattr(print_collector, 'txt'):
                     output += ''.join(print_collector.txt)

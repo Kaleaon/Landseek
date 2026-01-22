@@ -282,8 +282,9 @@ def parse_html_content(html_content: str, title: str = None) -> DocumentContent:
     except Exception as e:
         logger.warning(f"HTML parsing error: {e}")
         # Fall back to basic regex-based extraction
-        text = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+        # Use flexible regex that handles malformed closing tags with any whitespace/attributes
+        text = re.sub(r'<script\b[^>]*>.*?</script[^>]*>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<style\b[^>]*>.*?</style[^>]*>', '', text, flags=re.DOTALL | re.IGNORECASE)
         text = re.sub(r'<[^>]+>', ' ', text)
         text = re.sub(r'\s+', ' ', text)
         return DocumentContent(

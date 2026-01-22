@@ -1,0 +1,80 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-chat-room"
+version = "0.1.0"
+description = "AI Chat Room - A conversational AI application powered by RLM and Gemini for Pixel 10 Pro"
+authors = [{name = "AI Chat Room Contributors"}]
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = ["ai", "chatroom", "gemini", "llm", "recursive", "pixel", "android", "local"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Communications :: Chat",
+]
+
+dependencies = [
+    "litellm>=1.0.0",
+    "RestrictedPython>=6.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "black>=24.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
+
+# Android/Termux specific dependencies
+android = [
+    "termux-api>=0.1.0",  # For Termux integration
+]
+
+[project.scripts]
+ai-chat = "chat_room:main"
+
+[project.urls]
+Homepage = "https://github.com/Kaleaon/Landseek"
+Documentation = "https://github.com/Kaleaon/Landseek"
+Repository = "https://github.com/Kaleaon/Landseek"
+Issues = "https://github.com/Kaleaon/Landseek/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v"
+
+[tool.black]
+line-length = 100
+target-version = ['py39']
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

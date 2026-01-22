@@ -1,0 +1,12 @@
+{
+    "id": "sample_addon",
+    "name": "Sample Add-on",
+    "version": "1.0.0",
+    "description": "A sample add-on demonstrating how to extend the AI Chat Room with custom tools and personalities.",
+    "author": "AI Chat Room Team",
+    "homepage": "https://github.com/Kaleaon/Landseek",
+    "dependencies": [],
+    "min_app_version": "0.1.0",
+    "permissions": ["tools", "personalities"],
+    "enabled": true
+}

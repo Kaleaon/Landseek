@@ -30,6 +30,38 @@ Each AI personality has its own **private 10M+ token knowledge base** powered by
 3. **No context rot**: Avoids performance degradation with long contexts
 4. **Per-AI isolation**: Each personality maintains their own memories and knowledge
 
+### MemRL: Self-Evolving Memory (arXiv:2601.03192)
+
+The RAG system implements **MemRL** (Memory Reinforcement Learning) based on the paper "Self-Evolving Agents via Runtime Reinforcement Learning on Episodic Memory":
+
+**Key Features:**
+- **Q-Value Learning**: Each memory chunk has a learned utility score (Q-value) that improves over time
+- **Two-Phase Retrieval**: First filters by semantic relevance, then re-ranks by learned Q-values
+- **Runtime Adaptation**: Memory retrieval improves through feedback without retraining the LLM
+- **Stability-Plasticity Balance**: Core reasoning stays stable while memory adapts
+
+**How to Use MemRL:**
+
+```python
+from src.rag import AIRAGStore, RetrievalStrategy
+
+# Use MemRL retrieval strategy
+results = store.retrieve(
+    "user question", 
+    strategy=RetrievalStrategy.MEMRL
+)
+
+# Provide feedback to improve future retrievals
+chunk_ids = [r.chunk.chunk_id for r in results]
+store.provide_feedback(chunk_ids, success=True)  # Positive feedback
+store.provide_feedback(chunk_ids, success=False)  # Negative feedback
+
+# View MemRL statistics
+stats = store.get_memrl_stats()
+print(f"Average Q-value: {stats['avg_q_value']}")
+print(f"Success rate: {stats['success_rate']}")
+```
+
 ### RAG Functions Available to AI
 
 When responding, each AI can use these functions in their REPL environment:

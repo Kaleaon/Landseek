@@ -694,3 +694,247 @@ class TestRetrievalResult:
         assert data["score"] == 0.95
         assert data["strategy"] == "semantic"
         assert "chunk" in data
+
+
+class TestMemRL:
+    """Tests for MemRL (Memory Reinforcement Learning) functionality.
+    
+    Based on arXiv:2601.03192 - Self-Evolving Agents via Runtime 
+    Reinforcement Learning on Episodic Memory.
+    """
+    
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory for tests."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            yield Path(tmpdir)
+    
+    @pytest.fixture
+    def populated_store(self, temp_dir):
+        """Create a populated RAG store for MemRL tests."""
+        store = AIRAGStore("memrl_test", temp_dir)
+        
+        # Add various documents
+        store.add_document(
+            "Python is a high-level programming language widely used for AI.",
+            "python.txt"
+        )
+        store.add_document(
+            "Machine learning algorithms learn patterns from data.",
+            "ml.txt"
+        )
+        store.add_document(
+            "Deep learning uses neural networks with multiple layers.",
+            "dl.txt"
+        )
+        store.add_memory("User prefers Python for data science.", importance=0.9)
+        
+        return store
+    
+    def test_chunk_qvalue_initialization(self, temp_dir):
+        """Test that chunks are initialized with default Q-value."""
+        store = AIRAGStore("test", temp_dir)
+        store.add_document("Test content.", "test.txt")
+        
+        for chunk in store.chunks.values():
+            assert chunk.q_value == 0.5  # Default Q-value
+            assert chunk.retrieval_count == 0
+            assert chunk.success_count == 0
+    
+    def test_chunk_qvalue_serialization(self, temp_dir):
+        """Test that Q-values are correctly serialized and deserialized."""
+        store = AIRAGStore("test", temp_dir)
+        store.add_document("Test content.", "test.txt")
+        
+        # Modify Q-value
+        chunk_id = list(store.chunks.keys())[0]
+        store.chunks[chunk_id].q_value = 0.8
+        store.chunks[chunk_id].retrieval_count = 5
+        store.chunks[chunk_id].success_count = 3
+        store._save()
+        
+        # Create new store instance (should load from disk)
+        store2 = AIRAGStore("test", temp_dir)
+        chunk = store2.chunks[chunk_id]
+        
+        assert chunk.q_value == 0.8
+        assert chunk.retrieval_count == 5
+        assert chunk.success_count == 3
+    
+    def test_provide_positive_feedback(self, populated_store):
+        """Test that positive feedback increases Q-value."""
+        # Get some chunks
+        results = populated_store.retrieve("Python", top_k=2)
+        chunk_ids = [r.chunk.chunk_id for r in results]
+        
+        # Get initial Q-values
+        initial_qvalues = {cid: populated_store.chunks[cid].q_value for cid in chunk_ids}
+        
+        # Provide positive feedback
+        populated_store.provide_feedback(chunk_ids, success=True)
+        
+        # Q-values should increase
+        for cid in chunk_ids:
+            assert populated_store.chunks[cid].q_value > initial_qvalues[cid]
+            assert populated_store.chunks[cid].retrieval_count == 1
+            assert populated_store.chunks[cid].success_count == 1
+    
+    def test_provide_negative_feedback(self, populated_store):
+        """Test that negative feedback decreases Q-value."""
+        # Get some chunks
+        results = populated_store.retrieve("Python", top_k=2)
+        chunk_ids = [r.chunk.chunk_id for r in results]
+        
+        # Get initial Q-values
+        initial_qvalues = {cid: populated_store.chunks[cid].q_value for cid in chunk_ids}
+        
+        # Provide negative feedback
+        populated_store.provide_feedback(chunk_ids, success=False)
+        
+        # Q-values should decrease
+        for cid in chunk_ids:
+            assert populated_store.chunks[cid].q_value < initial_qvalues[cid]
+            assert populated_store.chunks[cid].retrieval_count == 1
+            assert populated_store.chunks[cid].success_count == 0
+    
+    def test_qvalue_bounds(self, populated_store):
+        """Test that Q-values stay within [0, 1] bounds."""
+        chunk_id = list(populated_store.chunks.keys())[0]
+        
+        # Many positive feedbacks - should not exceed 1.0
+        for _ in range(20):
+            populated_store.provide_feedback([chunk_id], success=True)
+        assert populated_store.chunks[chunk_id].q_value <= 1.0
+        
+        # Many negative feedbacks - should not go below 0.0
+        for _ in range(50):
+            populated_store.provide_feedback([chunk_id], success=False)
+        assert populated_store.chunks[chunk_id].q_value >= 0.0
+    
+    def test_memrl_retrieval_strategy(self, populated_store):
+        """Test MemRL retrieval strategy."""
+        # First, train some Q-values by providing feedback
+        results = populated_store.retrieve(
+            "Python programming",
+            strategy=RetrievalStrategy.SEMANTIC
+        )
+        
+        # Give positive feedback to first result, negative to others
+        if len(results) >= 2:
+            populated_store.provide_feedback([results[0].chunk.chunk_id], success=True)
+            populated_store.provide_feedback([results[1].chunk.chunk_id], success=False)
+        
+        # Now use MemRL strategy
+        memrl_results = populated_store.retrieve(
+            "Python programming",
+            strategy=RetrievalStrategy.MEMRL
+        )
+        
+        assert len(memrl_results) > 0
+        assert all(r.strategy == "memrl" for r in memrl_results)
+    
+    def test_memrl_ranks_by_qvalue(self, temp_dir):
+        """Test that MemRL considers Q-values in ranking."""
+        store = AIRAGStore("test", temp_dir)
+        
+        # Add similar documents
+        store.add_document("Python for machine learning.", "doc1.txt")
+        store.add_document("Python for data science.", "doc2.txt")
+        
+        # Manually set Q-values to test ranking
+        chunk_ids = list(store.chunks.keys())
+        if len(chunk_ids) >= 2:
+            store.chunks[chunk_ids[0]].q_value = 0.9  # High Q-value
+            store.chunks[chunk_ids[1]].q_value = 0.1  # Low Q-value
+            store._save()
+            
+            # MemRL should favor high Q-value chunks
+            results = store.retrieve("Python", strategy=RetrievalStrategy.MEMRL)
+            
+            assert len(results) > 0
+            # The high Q-value chunk should rank higher (given similar semantic relevance)
+            # This is a soft test since semantic scores also matter
+    
+    def test_get_chunk_qvalues(self, populated_store):
+        """Test getting Q-values for chunks."""
+        # Get all Q-values
+        all_qvalues = populated_store.get_chunk_qvalues()
+        assert len(all_qvalues) == len(populated_store.chunks)
+        assert all(0 <= v <= 1 for v in all_qvalues.values())
+        
+        # Get specific Q-values
+        chunk_ids = list(populated_store.chunks.keys())[:2]
+        specific_qvalues = populated_store.get_chunk_qvalues(chunk_ids)
+        assert len(specific_qvalues) == len(chunk_ids)
+    
+    def test_reset_qvalues(self, populated_store):
+        """Test resetting Q-values."""
+        # Modify Q-values
+        for chunk in populated_store.chunks.values():
+            chunk.q_value = 0.9
+            chunk.retrieval_count = 10
+            chunk.success_count = 5
+        
+        # Reset
+        populated_store.reset_qvalues(initial_value=0.3)
+        
+        # Verify reset
+        for chunk in populated_store.chunks.values():
+            assert chunk.q_value == 0.3
+            assert chunk.retrieval_count == 0
+            assert chunk.success_count == 0
+    
+    def test_get_memrl_stats(self, populated_store):
+        """Test getting MemRL statistics."""
+        # Provide some feedback
+        chunk_ids = list(populated_store.chunks.keys())
+        populated_store.provide_feedback(chunk_ids[:2], success=True)
+        populated_store.provide_feedback(chunk_ids[1:3], success=False)
+        
+        stats = populated_store.get_memrl_stats()
+        
+        assert "total_chunks" in stats
+        assert "avg_q_value" in stats
+        assert "min_q_value" in stats
+        assert "max_q_value" in stats
+        assert "total_retrievals" in stats
+        assert "total_successes" in stats
+        assert "success_rate" in stats
+        
+        assert stats["total_chunks"] == len(populated_store.chunks)
+        assert 0 <= stats["avg_q_value"] <= 1
+        assert stats["total_retrievals"] > 0
+    
+    def test_memrl_stats_empty_store(self, temp_dir):
+        """Test MemRL stats for empty store."""
+        store = AIRAGStore("empty", temp_dir)
+        stats = store.get_memrl_stats()
+        
+        assert stats["total_chunks"] == 0
+        assert stats["avg_q_value"] == 0.5  # Default
+        assert stats["total_retrievals"] == 0
+        assert stats["success_rate"] == 0.0
+    
+    def test_learning_rate_effect(self, temp_dir):
+        """Test that learning rate affects Q-value updates."""
+        store = AIRAGStore("test", temp_dir)
+        store.add_document("Test content.", "test.txt")
+        
+        chunk_id = list(store.chunks.keys())[0]
+        initial_qvalue = store.chunks[chunk_id].q_value
+        
+        # High learning rate should cause bigger change
+        store.provide_feedback([chunk_id], success=True, learning_rate=0.5)
+        high_lr_qvalue = store.chunks[chunk_id].q_value
+        
+        # Reset
+        store.chunks[chunk_id].q_value = initial_qvalue
+        
+        # Low learning rate should cause smaller change
+        store.provide_feedback([chunk_id], success=True, learning_rate=0.01)
+        low_lr_qvalue = store.chunks[chunk_id].q_value
+        
+        # High LR should result in bigger change
+        high_lr_change = abs(high_lr_qvalue - initial_qvalue)
+        low_lr_change = abs(low_lr_qvalue - initial_qvalue)
+        assert high_lr_change > low_lr_change

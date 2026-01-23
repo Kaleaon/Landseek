@@ -46,6 +46,7 @@ class RetrievalStrategy(Enum):
     HYBRID = "hybrid"  # Combination of semantic and keyword
     RECENCY = "recency"  # Prioritize recent additions
     RELEVANCE_DECAY = "relevance_decay"  # Semantic with time decay
+    MEMRL = "memrl"  # MemRL: Two-phase retrieval with Q-value ranking (arXiv:2601.03192)
 
 
 @dataclass
@@ -59,6 +60,10 @@ class TextChunk:
     token_count: int
     metadata: Dict[str, Any] = field(default_factory=dict)
     embedding: Optional[List[float]] = None
+    # MemRL Q-value for utility-based ranking (arXiv:2601.03192)
+    q_value: float = 0.5  # Initial Q-value (range 0-1)
+    retrieval_count: int = 0  # Number of times this chunk was retrieved
+    success_count: int = 0  # Number of successful retrievals (positive feedback)
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -69,7 +74,10 @@ class TextChunk:
             "timestamp": self.timestamp,
             "token_count": self.token_count,
             "metadata": self.metadata,
-            "embedding": self.embedding
+            "embedding": self.embedding,
+            "q_value": self.q_value,
+            "retrieval_count": self.retrieval_count,
+            "success_count": self.success_count
         }
     
     @classmethod
@@ -82,7 +90,10 @@ class TextChunk:
             timestamp=data.get("timestamp", ""),
             token_count=data.get("token_count", 0),
             metadata=data.get("metadata", {}),
-            embedding=data.get("embedding")
+            embedding=data.get("embedding"),
+            q_value=data.get("q_value", 0.5),
+            retrieval_count=data.get("retrieval_count", 0),
+            success_count=data.get("success_count", 0)
         )
 
 
@@ -792,7 +803,9 @@ class AIRAGStore:
         top_k: int = DEFAULT_TOP_K,
         strategy: RetrievalStrategy = RetrievalStrategy.HYBRID,
         source_types: List[str] = None,
-        time_decay: float = 0.0
+        time_decay: float = 0.0,
+        memrl_q_weight: float = 0.4,
+        memrl_candidate_multiplier: int = 3
     ) -> List[RetrievalResult]:
         """
         Retrieve relevant chunks for a query.
@@ -802,6 +815,9 @@ class AIRAGStore:
             top_k: Number of results to return
             strategy: Retrieval strategy to use
             source_types: Filter by source types (document, conversation, memory, knowledge)
+            time_decay: Time decay factor (0 = no decay, 1 = strong decay)
+            memrl_q_weight: Weight for Q-value in MemRL scoring (0-1). Higher = more weight on Q-value.
+            memrl_candidate_multiplier: Multiplier for candidate pool size in MemRL two-phase retrieval
             time_decay: Time decay factor (0 = no decay, 1 = strong decay)
             
         Returns:
@@ -874,6 +890,30 @@ class AIRAGStore:
             # Re-sort
             semantic_results.sort(key=lambda x: x.score, reverse=True)
             results = semantic_results[:top_k]
+        
+        elif strategy == RetrievalStrategy.MEMRL:
+            # MemRL: Two-phase retrieval with Q-value ranking (arXiv:2601.03192)
+            # Phase 1: Filter by semantic relevance (get more candidates than needed)
+            semantic_results = self._semantic_search(
+                query, candidate_chunks, top_k * memrl_candidate_multiplier
+            )
+            
+            # Phase 2: Re-rank by Q-value (learned utility)
+            # Combined score = semantic_score * (1 - q_weight) + q_value * q_weight
+            semantic_weight = 1.0 - memrl_q_weight
+            
+            for result in semantic_results:
+                q_value = result.chunk.q_value
+                semantic_score = result.score
+                # Combine semantic relevance with learned Q-value
+                result.score = (semantic_score * semantic_weight) + (q_value * memrl_q_weight)
+            
+            # Re-sort by combined score
+            semantic_results.sort(key=lambda x: x.score, reverse=True)
+            results = [
+                RetrievalResult(chunk=r.chunk, score=r.score, strategy="memrl")
+                for r in semantic_results[:top_k]
+            ]
         
         return results
     
@@ -988,6 +1028,106 @@ class AIRAGStore:
         except Exception as e:
             logger.error(f"Error importing RAG data: {e}")
             return False
+    
+    # MemRL: Q-value update methods (arXiv:2601.03192)
+    
+    def provide_feedback(
+        self, 
+        chunk_ids: List[str], 
+        success: bool,
+        learning_rate: float = 0.1
+    ) -> None:
+        """
+        Provide feedback on retrieved chunks to update Q-values.
+        
+        This implements the runtime reinforcement learning aspect of MemRL,
+        where Q-values are updated based on whether the retrieval was helpful.
+        
+        Args:
+            chunk_ids: List of chunk IDs that were retrieved
+            success: Whether the retrieval led to a successful outcome
+            learning_rate: Learning rate for Q-value updates (0-1)
+        """
+        for chunk_id in chunk_ids:
+            if chunk_id in self.chunks:
+                chunk = self.chunks[chunk_id]
+                chunk.retrieval_count += 1
+                
+                if success:
+                    chunk.success_count += 1
+                
+                # Update Q-value using temporal difference-like update
+                # Q(s,a) = Q(s,a) + α * (reward - Q(s,a))
+                reward = 1.0 if success else 0.0
+                chunk.q_value = chunk.q_value + learning_rate * (reward - chunk.q_value)
+                
+                # Clamp Q-value to [0, 1]
+                chunk.q_value = max(0.0, min(1.0, chunk.q_value))
+        
+        self._save()
+    
+    def get_chunk_qvalues(self, chunk_ids: List[str] = None) -> Dict[str, float]:
+        """
+        Get Q-values for chunks.
+        
+        Args:
+            chunk_ids: Optional list of specific chunk IDs. If None, returns all.
+            
+        Returns:
+            Dict mapping chunk_id to Q-value
+        """
+        if chunk_ids is None:
+            return {cid: chunk.q_value for cid, chunk in self.chunks.items()}
+        return {
+            cid: self.chunks[cid].q_value 
+            for cid in chunk_ids 
+            if cid in self.chunks
+        }
+    
+    def reset_qvalues(self, initial_value: float = 0.5) -> None:
+        """
+        Reset all Q-values to initial value.
+        
+        Args:
+            initial_value: The value to reset Q-values to (default 0.5)
+        """
+        for chunk in self.chunks.values():
+            chunk.q_value = initial_value
+            chunk.retrieval_count = 0
+            chunk.success_count = 0
+        self._save()
+    
+    def get_memrl_stats(self) -> Dict[str, Any]:
+        """
+        Get MemRL-specific statistics.
+        
+        Returns:
+            Dict with MemRL statistics including Q-value distribution
+        """
+        if not self.chunks:
+            return {
+                "total_chunks": 0,
+                "avg_q_value": 0.5,
+                "min_q_value": 0.5,
+                "max_q_value": 0.5,
+                "total_retrievals": 0,
+                "total_successes": 0,
+                "success_rate": 0.0
+            }
+        
+        q_values = [c.q_value for c in self.chunks.values()]
+        total_retrievals = sum(c.retrieval_count for c in self.chunks.values())
+        total_successes = sum(c.success_count for c in self.chunks.values())
+        
+        return {
+            "total_chunks": len(self.chunks),
+            "avg_q_value": sum(q_values) / len(q_values),
+            "min_q_value": min(q_values),
+            "max_q_value": max(q_values),
+            "total_retrievals": total_retrievals,
+            "total_successes": total_successes,
+            "success_rate": total_successes / total_retrievals if total_retrievals > 0 else 0.0
+        }
 
 
 class RAGManager:

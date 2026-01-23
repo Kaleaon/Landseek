@@ -699,8 +699,8 @@ class TestRetrievalResult:
 class TestMemRL:
     """Tests for MemRL (Memory Reinforcement Learning) functionality.
     
-    Based on arXiv:2601.03192 - Self-Evolving Agents via Runtime 
-    Reinforcement Learning on Episodic Memory.
+    Based on arXiv:2601.03192 "Self-Evolving Agents via Runtime Reinforcement
+    Learning on Episodic Memory".
     """
     
     @pytest.fixture

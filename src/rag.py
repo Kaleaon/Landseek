@@ -803,7 +803,9 @@ class AIRAGStore:
         top_k: int = DEFAULT_TOP_K,
         strategy: RetrievalStrategy = RetrievalStrategy.HYBRID,
         source_types: List[str] = None,
-        time_decay: float = 0.0
+        time_decay: float = 0.0,
+        memrl_q_weight: float = 0.4,
+        memrl_candidate_multiplier: int = 3
     ) -> List[RetrievalResult]:
         """
         Retrieve relevant chunks for a query.
@@ -813,6 +815,9 @@ class AIRAGStore:
             top_k: Number of results to return
             strategy: Retrieval strategy to use
             source_types: Filter by source types (document, conversation, memory, knowledge)
+            time_decay: Time decay factor (0 = no decay, 1 = strong decay)
+            memrl_q_weight: Weight for Q-value in MemRL scoring (0-1). Higher = more weight on Q-value.
+            memrl_candidate_multiplier: Multiplier for candidate pool size in MemRL two-phase retrieval
             time_decay: Time decay factor (0 = no decay, 1 = strong decay)
             
         Returns:
@@ -889,17 +894,19 @@ class AIRAGStore:
         elif strategy == RetrievalStrategy.MEMRL:
             # MemRL: Two-phase retrieval with Q-value ranking (arXiv:2601.03192)
             # Phase 1: Filter by semantic relevance (get more candidates than needed)
-            semantic_results = self._semantic_search(query, candidate_chunks, top_k * 3)
+            semantic_results = self._semantic_search(
+                query, candidate_chunks, top_k * memrl_candidate_multiplier
+            )
             
             # Phase 2: Re-rank by Q-value (learned utility)
-            # Combined score = semantic_score * q_value_weight + q_value * (1 - q_value_weight)
-            q_value_weight = 0.6  # Weight for semantic vs Q-value
+            # Combined score = semantic_score * (1 - q_weight) + q_value * q_weight
+            semantic_weight = 1.0 - memrl_q_weight
             
             for result in semantic_results:
                 q_value = result.chunk.q_value
                 semantic_score = result.score
                 # Combine semantic relevance with learned Q-value
-                result.score = (semantic_score * q_value_weight) + (q_value * (1 - q_value_weight))
+                result.score = (semantic_score * semantic_weight) + (q_value * memrl_q_weight)
             
             # Re-sort by combined score
             semantic_results.sort(key=lambda x: x.score, reverse=True)

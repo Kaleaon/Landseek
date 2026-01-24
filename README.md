@@ -660,8 +660,14 @@ model="claude-sonnet-4"
 ```
 AI Chat Room
 ├── chat_room.py          # Main terminal application
-├── android/              # Android app (Kivy)
+├── android/              # Android app (Kivy/Python)
 │   └── main.py          # Kivy Android entry point
+├── android_kotlin/       # Native Kotlin Android app (NEW!)
+│   ├── app/src/main/java/com/landseek/aichat/
+│   │   ├── domain/model/  # Kotlin data models
+│   │   ├── data/          # Room database
+│   │   └── ui/            # Jetpack Compose UI
+│   └── README.md         # Kotlin conversion docs
 ├── src/
 │   ├── rlm/              # RLM library
 │   │   ├── core.py      # Core RLM logic
@@ -686,9 +692,39 @@ AI Chat Room
 
 The Android app provides a **full graphical user interface** with modern Material Design.
 
-### Building the APK
+### Option 1: Native Kotlin (Recommended)
 
-The Android app is built using Kivy and Buildozer:
+A **native Kotlin Android app** is available in the `android_kotlin/` directory:
+
+```bash
+cd android_kotlin
+
+# Open in Android Studio or build from command line
+./gradlew assembleDebug
+```
+
+**Native Kotlin Features:**
+- 📱 **Jetpack Compose** - Modern declarative UI
+- 🗄️ **Room Database** - Local persistence
+- 💉 **Hilt** - Dependency injection
+- 🎨 **Material 3** - Latest design system
+- ⚡ **Coroutines** - Efficient async operations
+
+**Converted Files:**
+
+| Python | Kotlin | Description |
+|--------|--------|-------------|
+| `src/personalities.py` | `domain/model/Personalities.kt` | AI personalities |
+| `src/ai_state.py` | `domain/model/AIState.kt` | State management |
+| `src/tools.py` | `domain/model/Tools.kt` | Tool system |
+| `src/model_manager.py` | `domain/model/ModelManager.kt` | Model catalog |
+| `src/local_storage.py` | `data/model/LocalStorage.kt` | Room database |
+
+See [android_kotlin/README.md](android_kotlin/README.md) for detailed conversion notes.
+
+### Option 2: Kivy/Buildozer (Python)
+
+The Python-based app using Kivy and Buildozer:
 
 ```bash
 # Install Buildozer

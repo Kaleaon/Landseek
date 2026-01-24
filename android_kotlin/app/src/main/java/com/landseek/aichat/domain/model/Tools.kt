@@ -301,6 +301,16 @@ class ToolRegistry {
 
 // Tool implementations
 
+/** Maximum length for mathematical expressions */
+private const val MAX_EXPRESSION_LENGTH = 200
+
+/** Allowed mathematical function names */
+private val ALLOWED_MATH_FUNCTIONS = setOf(
+    "sqrt", "sin", "cos", "tan", "asin", "acos", "atan",
+    "log", "log10", "log2", "exp", "abs", "floor", "ceil",
+    "round", "min", "max", "pow", "pi", "e", "tau"
+)
+
 /**
  * Evaluate a mathematical expression safely.
  */
@@ -308,15 +318,21 @@ fun calculate(kwargs: Map<String, Any?>): ToolResult {
     val expression = kwargs["expression"] as? String
         ?: return ToolResult(success = false, output = null, error = "Expression required")
 
-    // Validate expression - only allow safe characters
-    val allowedPattern = Regex("^[\\d\\s+\\-*/().a-zA-Z]+$")
-    if (!expression.matches(allowedPattern)) {
-        return ToolResult(success = false, output = null, error = "Expression contains invalid characters")
+    // Validate expression - only allow safe characters (digits, operators, parentheses, dots, spaces)
+    // Letters are only allowed as part of known function names
+    val allowedCharsPattern = Regex("^[\\d\\s+\\-*/().]+$")
+    val withoutFunctions = ALLOWED_MATH_FUNCTIONS.fold(expression.lowercase()) { acc, func ->
+        acc.replace(func, "")
+    }
+    
+    // After removing known functions, only operators and numbers should remain
+    if (!withoutFunctions.matches(allowedCharsPattern)) {
+        return ToolResult(success = false, output = null, error = "Expression contains invalid characters or unknown functions")
     }
 
-    // Limit expression length
-    if (expression.length > 200) {
-        return ToolResult(success = false, output = null, error = "Expression too long (max 200 characters)")
+    // Limit expression length to prevent DoS
+    if (expression.length > MAX_EXPRESSION_LENGTH) {
+        return ToolResult(success = false, output = null, error = "Expression too long (max $MAX_EXPRESSION_LENGTH characters)")
     }
 
     return try {

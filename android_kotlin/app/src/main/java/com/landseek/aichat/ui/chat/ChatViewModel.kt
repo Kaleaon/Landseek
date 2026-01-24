@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.landseek.aichat.data.repository.MessageRepository
 import com.landseek.aichat.data.repository.AIStateRepository
 import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
+import com.landseek.aichat.ui.theme.AIColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -33,20 +34,6 @@ class ChatViewModel @Inject constructor(
     
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
-    
-    // AI personality colors
-    private val aiColors = mapOf(
-        "nova" to Color(0xFFFFD700),
-        "echo" to Color(0xFFFF69B4),
-        "sage" to Color(0xFF4169E1),
-        "spark" to Color(0xFFFF4500),
-        "atlas" to Color(0xFF2E8B57),
-        "luna" to Color(0xFF9370DB),
-        "cipher" to Color(0xFF00CED1),
-        "muse" to Color(0xFFFF1493),
-        "phoenix" to Color(0xFFFF6347),
-        "zen" to Color(0xFF98FB98)
-    )
     
     init {
         initializeDefaultAIs()
@@ -79,21 +66,21 @@ class ChatViewModel @Inject constructor(
                 avatar = "🌟",
                 content = "Hello! I'm Nova, curious and analytical. I love exploring ideas deeply. What would you like to discuss today?",
                 isUser = false,
-                senderColor = aiColors["nova"] ?: Color.White
+                senderColor = AIColors.getColorForAI("nova")
             ),
             ChatMessage(
                 sender = "Echo",
                 avatar = "🎭",
                 content = "Hey there! I'm Echo, the creative spirit of our group. Think of me as your friendly muse! 🎨",
                 isUser = false,
-                senderColor = aiColors["echo"] ?: Color.White
+                senderColor = AIColors.getColorForAI("echo")
             ),
             ChatMessage(
                 sender = "Sage",
                 avatar = "🦉",
                 content = "Greetings, seeker of wisdom. I am Sage, here to offer balanced perspectives and thoughtful insights.",
                 isUser = false,
-                senderColor = aiColors["sage"] ?: Color.White
+                senderColor = AIColors.getColorForAI("sage")
             )
         )
         _messages.value = welcomeMessages
@@ -143,7 +130,7 @@ class ChatViewModel @Inject constructor(
                 avatar = ai.avatar,
                 content = response,
                 isUser = false,
-                senderColor = aiColors[ai.id] ?: Color.White
+                senderColor = AIColors.getColorForAI(ai.id)
             )
             _messages.value = _messages.value + aiMessage
         }

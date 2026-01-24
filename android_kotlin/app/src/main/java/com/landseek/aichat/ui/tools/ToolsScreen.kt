@@ -263,7 +263,15 @@ fun ToolExecutionSheet(
             // Execute button
             Button(
                 onClick = {
-                    val args = paramValues.mapValues { (_, value) -> value as Any? }
+                    // Convert string values to appropriate types based on parameter definitions
+                    val args: Map<String, Any?> = paramValues.mapValues { (paramName, value) ->
+                        val paramType = tool.parameters[paramName]?.type ?: "string"
+                        when (paramType.lowercase()) {
+                            "number", "integer" -> value.toDoubleOrNull() ?: value
+                            "boolean" -> value.lowercase() == "true"
+                            else -> value  // Keep as string for other types
+                        }
+                    }
                     onExecute(args)
                 },
                 modifier = Modifier.fillMaxWidth()

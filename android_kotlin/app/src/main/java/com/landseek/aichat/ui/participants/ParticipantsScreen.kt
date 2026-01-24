@@ -87,20 +87,7 @@ fun PersonalityCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val aiColors = mapOf(
-        "Nova" to Color(0xFFFFD700),
-        "Echo" to Color(0xFFFF69B4),
-        "Sage" to Color(0xFF4169E1),
-        "Spark" to Color(0xFFFF4500),
-        "Atlas" to Color(0xFF2E8B57),
-        "Luna" to Color(0xFF9370DB),
-        "Cipher" to Color(0xFF00CED1),
-        "Muse" to Color(0xFFFF1493),
-        "Phoenix" to Color(0xFFFF6347),
-        "Zen" to Color(0xFF98FB98)
-    )
-    
-    val accentColor = aiColors[personality.name] ?: AIPrimary
+    val accentColor = AIColors.getColorForAI(personality.name)
     
     Card(
         onClick = onClick,

@@ -11,18 +11,24 @@ This is a **native Android application** built with:
 - **Room** - Local database persistence
 - **Coroutines & Flow** - Asynchronous programming
 - **Material 3** - Modern Material Design components
+- **Java-WebSocket** - P2P networking
 
 ## Conversion from Python
 
-This Kotlin implementation is a direct port of the Python code in the parent directory:
+This Kotlin implementation is a **complete port** of all Python code in the parent directory:
 
 | Python File | Kotlin File | Description |
 |-------------|-------------|-------------|
-| `src/personalities.py` | `domain/model/Personalities.kt` | AI personality definitions |
-| `src/ai_state.py` | `domain/model/AIState.kt` | AI state management |
+| `src/personalities.py` | `domain/model/Personalities.kt` | AI personality definitions (10 personalities) |
+| `src/ai_state.py` | `domain/model/AIState.kt` | AI state management, emotions, relationships |
 | `src/tools.py` | `domain/model/Tools.kt` | Tool registry and implementations |
 | `src/model_manager.py` | `domain/model/ModelManager.kt` | Model catalog and download |
 | `src/local_storage.py` | `data/model/LocalStorage.kt` | Room database entities |
+| `src/p2p.py` | `domain/model/P2P.kt` | **Full P2P networking** (WebSocket, room hosting/joining) |
+| `src/document_reader.py` | `domain/model/DocumentReader.kt` | **Multi-format document processing** (PDF, images, etc.) |
+| `src/rag.py` | `domain/model/RAG.kt` | **RAG system** (10M token context, per-AI storage) |
+| `src/rlm/*.py` | `domain/model/RLM.kt` | **Recursive Language Model** (core, parser, REPL) |
+| `src/addons/__init__.py` | `domain/model/Addons.kt` | **Add-on/plugin system** |
 | `android/main.py` (Kivy) | `ui/*` | Complete Jetpack Compose UI |
 
 ## Tools Used for Conversion
@@ -50,7 +56,7 @@ python -m py2many --kotlin src/personalities.py --comment-unsupported
 - Python modules → Kotlin packages with proper Android architecture (MVVM)
 - Kivy UI → Jetpack Compose
 - JSON file storage → Room SQLite database
-- Python networking → OkHttp/Retrofit
+- Python networking → WebSocket + OkHttp
 
 ## Project Structure
 
@@ -70,8 +76,13 @@ android_kotlin/
 │   │   │   ├── domain/
 │   │   │   │   └── model/                # Domain models
 │   │   │   │       ├── AIState.kt        # AI state classes
+│   │   │   │       ├── Addons.kt         # Add-on system
+│   │   │   │       ├── DocumentReader.kt # Document processing
 │   │   │   │       ├── ModelManager.kt   # Model catalog
+│   │   │   │       ├── P2P.kt            # P2P networking
 │   │   │   │       ├── Personalities.kt  # AI personalities
+│   │   │   │       ├── RAG.kt            # RAG system
+│   │   │   │       ├── RLM.kt            # Recursive Language Model
 │   │   │   │       └── Tools.kt          # Tool system
 │   │   │   └── ui/
 │   │   │       ├── AIChatApp.kt          # Main app composable
@@ -104,6 +115,11 @@ android_kotlin/
 - ✅ **Settings** - Model selection, user preferences
 - ✅ **Document Management** - Upload and analyze documents
 - ✅ **Material 3 Theme** - Dark mode with custom colors
+- ✅ **P2P Networking** - Full WebSocket-based room hosting/joining
+- ✅ **Document Reader** - Multi-format processing (PDF, images, code)
+- ✅ **RAG System** - 10M+ token context with per-AI storage
+- ✅ **RLM Core** - Recursive Language Model with REPL
+- ✅ **Add-on System** - Plugin architecture for extensions
 
 ## Building
 

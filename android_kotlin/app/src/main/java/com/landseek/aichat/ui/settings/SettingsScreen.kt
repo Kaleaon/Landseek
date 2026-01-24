@@ -17,9 +17,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
-import com.landseek.aichat.domain.model.MODEL_CATALOG
+import com.landseek.aichat.domain.model.*
 import com.landseek.aichat.ui.theme.*
+import kotlinx.coroutines.launch
 
 @Composable
 fun SettingsScreen() {
@@ -28,6 +31,17 @@ fun SettingsScreen() {
     var ollamaUrl by remember { mutableStateOf("http://localhost:11434") }
     var darkMode by remember { mutableStateOf(true) }
     var notificationsEnabled by remember { mutableStateOf(true) }
+    
+    // P2P State
+    var showHostDialog by remember { mutableStateOf(false) }
+    var showJoinDialog by remember { mutableStateOf(false) }
+    var shareCode by remember { mutableStateOf("") }
+    var joinCode by remember { mutableStateOf("") }
+    var p2pStatus by remember { mutableStateOf<String?>(null) }
+    
+    val p2pManager = remember { getP2PNetworkManager() }
+    val connectionState by p2pManager.connectionState.collectAsState()
+    val scope = rememberCoroutineScope()
     
     Column(
         modifier = Modifier
@@ -145,11 +159,93 @@ fun SettingsScreen() {
         
         // P2P Settings
         SettingsSection(title = "P2P Networking") {
+            // Connection Status
+            when (val state = connectionState) {
+                is P2PConnectionState.Connected -> {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFF2E7D32).copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Wifi,
+                                contentDescription = null,
+                                tint = Color(0xFF4CAF50)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("Connected", color = Color(0xFF4CAF50))
+                                Text(
+                                    "Room: ${state.roomInfo.roomCode}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = AITextSecondary
+                                )
+                            }
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { p2pManager.disconnect() }) {
+                                Text("Disconnect", color = Color(0xFFFF5252))
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                is P2PConnectionState.Connecting -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Connecting...", color = AITextSecondary)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                is P2PConnectionState.Error -> {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color(0xFFD32F2F).copy(alpha = 0.2f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Error,
+                                contentDescription = null,
+                                tint = Color(0xFFFF5252)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Error: ${state.message}",
+                                color = Color(0xFFFF5252),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+                else -> {}
+            }
+            
             SettingsButton(
                 label = "Host Room",
-                description = "Share your AI with others",
+                description = "Share your AI with others over the network",
                 icon = Icons.Default.Share,
-                onClick = { /* TODO */ }
+                onClick = { 
+                    val roomInfo = p2pManager.hostRoom(name = "AI Chat Room")
+                    shareCode = roomInfo.shareCodeLocal
+                    showHostDialog = true
+                }
             )
             
             Spacer(Modifier.height(8.dp))
@@ -158,7 +254,7 @@ fun SettingsScreen() {
                 label = "Join Room",
                 description = "Connect to someone else's AI",
                 icon = Icons.Default.PersonAdd,
-                onClick = { /* TODO */ }
+                onClick = { showJoinDialog = true }
             )
         }
         
@@ -225,6 +321,135 @@ fun SettingsScreen() {
         }
         
         Spacer(Modifier.height(32.dp))
+    }
+    
+    // Host Room Dialog
+    if (showHostDialog) {
+        val clipboardManager = LocalClipboardManager.current
+        AlertDialog(
+            onDismissRequest = { showHostDialog = false },
+            title = { Text("Room Hosted", color = Color.White) },
+            text = {
+                Column {
+                    Text(
+                        "Share this code with others to let them join:",
+                        color = AITextSecondary
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = AISurface),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                shareCode,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = AIPrimary
+                            )
+                            IconButton(onClick = {
+                                clipboardManager.setText(AnnotatedString(shareCode))
+                            }) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "Copy",
+                                    tint = AITextSecondary
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Others can use 'Join Room' and paste this code to connect.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AITextSecondary
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showHostDialog = false }) {
+                    Text("Done", color = AIPrimary)
+                }
+            },
+            containerColor = AIBackground
+        )
+    }
+    
+    // Join Room Dialog
+    if (showJoinDialog) {
+        AlertDialog(
+            onDismissRequest = { showJoinDialog = false },
+            title = { Text("Join Room", color = Color.White) },
+            text = {
+                Column {
+                    Text(
+                        "Enter the share code from the room host:",
+                        color = AITextSecondary
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = joinCode,
+                        onValueChange = { joinCode = it },
+                        label = { Text("Share Code") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = AIPrimary,
+                            unfocusedBorderColor = AIDivider,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedLabelColor = AIPrimary,
+                            unfocusedLabelColor = AITextSecondary
+                        ),
+                        singleLine = true
+                    )
+                    if (p2pStatus != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            p2pStatus!!,
+                            color = if (p2pStatus!!.contains("Error")) AIError else Color(0xFF4CAF50),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        scope.launch {
+                            p2pStatus = "Connecting..."
+                            val result = p2pManager.joinRoom(joinCode, userName)
+                            result.fold(
+                                onSuccess = {
+                                    p2pStatus = "Connected!"
+                                    showJoinDialog = false
+                                    joinCode = ""
+                                },
+                                onFailure = {
+                                    p2pStatus = "Error: ${it.message}"
+                                }
+                            )
+                        }
+                    }
+                ) {
+                    Text("Connect", color = AIPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showJoinDialog = false
+                    joinCode = ""
+                    p2pStatus = null
+                }) {
+                    Text("Cancel", color = AITextSecondary)
+                }
+            },
+            containerColor = AIBackground
+        )
     }
 }
 

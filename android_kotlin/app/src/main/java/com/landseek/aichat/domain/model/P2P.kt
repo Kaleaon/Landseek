@@ -436,10 +436,13 @@ class P2PNetworkManager(
     
     private fun startServer(port: Int) {
         scope.launch {
-            // WebSocket server implementation would go here
-            // Using org.java_websocket.server.WebSocketServer
+            // TODO: Implement WebSocket server using org.java_websocket.server.WebSocketServer
+            // 1. Create WebSocketServer subclass
+            // 2. Override onOpen, onClose, onMessage, onError
+            // 3. Call start() to begin accepting connections
+            // See: https://github.com/TooTallNate/Java-WebSocket
             
-            // Start heartbeat
+            // Start heartbeat loop
             while (running) {
                 delay(HEARTBEAT_INTERVAL_MS)
                 sendHeartbeat()

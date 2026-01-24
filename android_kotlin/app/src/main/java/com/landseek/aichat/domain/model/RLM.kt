@@ -421,11 +421,11 @@ class OllamaProvider(
     private val baseUrl: String = "http://localhost:11434"
 ) : LLMProvider {
     override suspend fun complete(messages: List<RLMMessage>, temperature: Float): String {
-        // This would make actual HTTP calls to Ollama
-        // Simplified for now - would use Retrofit/OkHttp
         return withContext(Dispatchers.IO) {
-            // Placeholder - actual implementation would call Ollama API
-            "[Ollama response would go here]"
+            // TODO: Implement actual Ollama API calls using Retrofit/OkHttp
+            // POST to $baseUrl/api/chat with JSON body containing model, messages, etc.
+            // For now, returns placeholder - replace with real HTTP client implementation
+            throw NotImplementedError("Ollama API integration requires HTTP client setup. See: https://github.com/ollama/ollama/blob/main/docs/api.md")
         }
     }
 }
@@ -604,9 +604,20 @@ class RLM(
             )
         
         return try {
-            // Execute the tool
-            @Suppress("UNCHECKED_CAST")
-            val result = tool.execute(toolCall.arguments as Map<String, Any?>)
+            // Convert String arguments to Any? for tool execution
+            // Tool parameters are stored as strings in ToolCall but tools expect Map<String, Any?>
+            val typedArguments: Map<String, Any?> = toolCall.arguments.mapValues { (key, value) ->
+                // Attempt to parse the string value to appropriate type
+                when {
+                    value.equals("true", ignoreCase = true) -> true
+                    value.equals("false", ignoreCase = true) -> false
+                    value.toDoubleOrNull() != null -> value.toDouble()
+                    value.toIntOrNull() != null -> value.toInt()
+                    else -> value  // Keep as string
+                }
+            }
+            
+            val result = tool.execute(typedArguments)
             ToolCallResult(
                 id = toolCall.id,
                 name = toolCall.name,

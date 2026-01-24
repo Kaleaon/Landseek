@@ -474,10 +474,10 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readPdfFile(file: File): DocumentReadResult {
-        // PDF reading requires external library (pdfbox-android)
-        // This is a placeholder - would use com.tom_roush:pdfbox-android
+        // TODO: Implement PDF text extraction using com.tom_roush:pdfbox-android
+        // Add dependency: implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+        // Usage: PDDocument.load(file) -> pdfStripper.getText(document)
         return try {
-            // Simplified: just note that it's a PDF
             val metadata = mapOf(
                 "path" to file.absolutePath,
                 "size" to file.length().toString()
@@ -485,7 +485,7 @@ class DocumentReader(private val context: Context? = null) {
             
             DocumentReadResult.Success(
                 DocumentContent(
-                    text = "[PDF Document: ${file.name}]\n\nNote: PDF text extraction requires additional processing.",
+                    text = "[PDF Document: ${file.name}]\n\n⚠️ PDF text extraction requires pdfbox-android library. Add 'com.tom-roush:pdfbox-android:2.0.27.0' to dependencies.",
                     title = file.nameWithoutExtension,
                     sourceType = "file",
                     originalFormat = "pdf",
@@ -498,7 +498,9 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readDocxFile(file: File): DocumentReadResult {
-        // DOCX reading would require Apache POI or similar
+        // TODO: Implement DOCX text extraction using Apache POI or similar
+        // Add dependency: implementation("org.apache.poi:poi-ooxml:5.2.5")
+        // Usage: XWPFDocument(FileInputStream(file)) -> iterate paragraphs
         return try {
             val metadata = mapOf(
                 "path" to file.absolutePath,
@@ -507,7 +509,7 @@ class DocumentReader(private val context: Context? = null) {
             
             DocumentReadResult.Success(
                 DocumentContent(
-                    text = "[Word Document: ${file.name}]\n\nNote: DOCX text extraction requires additional processing.",
+                    text = "[Word Document: ${file.name}]\n\n⚠️ DOCX text extraction requires Apache POI library. Add 'org.apache.poi:poi-ooxml:5.2.5' to dependencies.",
                     title = file.nameWithoutExtension,
                     sourceType = "file",
                     originalFormat = "docx",

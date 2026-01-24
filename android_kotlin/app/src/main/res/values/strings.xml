@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AI Chat Room</string>
+    <string name="chat">Chat</string>
+    <string name="participants">Participants</string>
+    <string name="documents">Documents</string>
+    <string name="tools">Tools</string>
+    <string name="settings">Settings</string>
+    <string name="send">Send</string>
+    <string name="type_message">Type a message...</string>
+    <string name="upload_document">Upload Document</string>
+    <string name="private_chat">Private Chat</string>
+    <string name="rename">Rename</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="ok">OK</string>
+    <string name="welcome_message">Welcome to AI Chat Room! 🎉</string>
+</resources>

@@ -1,5 +1,9 @@
 /**
  * Chat ViewModel - Manages chat state and logic
+ * Enhanced with GPT Mobile patterns:
+ * - ChatUiState sealed class for clean state management
+ * - Streaming support with partial content
+ * - ThinkingBlock state for RAG/RLM status
  */
 
 package com.landseek.aichat.ui.chat
@@ -16,6 +20,20 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.*
 import javax.inject.Inject
+
+/**
+ * Streaming configuration constants
+ * Extracted for maintainability (addresses code review feedback)
+ */
+private object StreamingConfig {
+    const val THINKING_PHASE_DELAY_MS = 300L
+    const val FORMULATING_DELAY_MS = 200L
+    const val SENTENCE_END_DELAY_MS = 100L  // After . ! ?
+    const val CLAUSE_DELAY_MS = 50L         // After , ; :
+    const val WORD_DELAY_MS = 20L           // After space
+    const val CHARACTER_DELAY_MS = 15L      // Default
+    const val MESSAGE_GAP_DELAY_MS = 200L   // Between AI responses
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -34,6 +52,14 @@ class ChatViewModel @Inject constructor(
     
     private val _isProcessing = MutableStateFlow(false)
     val isProcessing: StateFlow<Boolean> = _isProcessing.asStateFlow()
+    
+    // GPT Mobile pattern: ChatUiState for clean state management
+    private val _uiState = MutableStateFlow<ChatUiState>(ChatUiState.Idle)
+    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    
+    // Current AI thought/reasoning for ThinkingBlock
+    private val _currentThought = MutableStateFlow("")
+    val currentThought: StateFlow<String> = _currentThought.asStateFlow()
     
     init {
         initializeDefaultAIs()
@@ -96,6 +122,7 @@ class ChatViewModel @Inject constructor(
         
         viewModelScope.launch {
             _isProcessing.value = true
+            _uiState.value = ChatUiState.Loading
             _inputText.value = ""
             
             // Add user message
@@ -108,31 +135,85 @@ class ChatViewModel @Inject constructor(
             )
             _messages.value = _messages.value + userMessage
             
-            // Simulate AI responses
+            // Simulate AI responses with streaming and thinking
             simulateAIResponses(text)
             
             _isProcessing.value = false
+            _uiState.value = ChatUiState.Idle
+            _currentThought.value = ""
         }
     }
     
     private suspend fun simulateAIResponses(userText: String) {
-        // Simulate a delay and generate responses from active AIs
-        kotlinx.coroutines.delay(500)
-        
         val activeAIList = _activeAIs.value.filter { it.isActive }
         
         for (ai in activeAIList) {
-            kotlinx.coroutines.delay(300)
+            // Phase 1: Thinking/RAG retrieval (GPT Mobile ThinkingBlock pattern)
+            _uiState.value = ChatUiState.Thinking(ai.id, "Retrieving context...")
+            _currentThought.value = "🔍 ${ai.name} is searching knowledge base..."
+            kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
             
-            val response = generateAIResponse(ai, userText)
-            val aiMessage = ChatMessage(
+            _currentThought.value = "📚 ${ai.name} is processing relevant context..."
+            kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
+            
+            _currentThought.value = "💭 ${ai.name} is formulating response..."
+            kotlinx.coroutines.delay(StreamingConfig.FORMULATING_DELAY_MS)
+            
+            // Phase 2: Generate response with streaming simulation
+            val fullResponse = generateAIResponse(ai, userText)
+            
+            // Add message with loading state (shows ● cursor)
+            val messageId = UUID.randomUUID().toString()
+            val loadingMessage = ChatMessage(
+                id = messageId,
                 sender = ai.name,
                 avatar = ai.avatar,
-                content = response,
+                content = "",
                 isUser = false,
-                senderColor = AIColors.getColorForAI(ai.id)
+                senderColor = AIColors.getColorForAI(ai.id),
+                isLoading = true,
+                thoughts = "Processing with RAG context...",
+                canRetry = true
             )
-            _messages.value = _messages.value + aiMessage
+            _messages.value = _messages.value + loadingMessage
+            _uiState.value = ChatUiState.Streaming(ai.id, "")
+            
+            // Phase 3: Stream response character by character (GPT Mobile pattern)
+            var streamedContent = ""
+            for (char in fullResponse) {
+                streamedContent += char
+                _uiState.value = ChatUiState.Streaming(ai.id, streamedContent)
+                
+                // Update message with partial content
+                _messages.value = _messages.value.map { msg ->
+                    if (msg.id == messageId) {
+                        msg.copy(content = streamedContent, isLoading = true)
+                    } else msg
+                }
+                
+                // Variable delay for natural feel (using config constants)
+                val delay = when (char) {
+                    '.', '!', '?' -> StreamingConfig.SENTENCE_END_DELAY_MS
+                    ',', ';', ':' -> StreamingConfig.CLAUSE_DELAY_MS
+                    ' ' -> StreamingConfig.WORD_DELAY_MS
+                    else -> StreamingConfig.CHARACTER_DELAY_MS
+                }
+                kotlinx.coroutines.delay(delay)
+            }
+            
+            // Phase 4: Finalize message (remove loading state)
+            _messages.value = _messages.value.map { msg ->
+                if (msg.id == messageId) {
+                    msg.copy(
+                        content = fullResponse,
+                        isLoading = false,
+                        thoughts = "",
+                        canRetry = true
+                    )
+                } else msg
+            }
+            
+            kotlinx.coroutines.delay(StreamingConfig.MESSAGE_GAP_DELAY_MS)
         }
     }
     

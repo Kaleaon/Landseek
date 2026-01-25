@@ -119,6 +119,10 @@ dependencies {
     // Image Processing
     implementation("io.coil-kt:coil-compose:2.5.0")
     
+    // Markdown Rendering (from GPT Mobile design patterns)
+    implementation("com.halilibo.compose-richtext:richtext-commonmark:1.0.0-alpha01")
+    implementation("com.halilibo.compose-richtext:richtext-ui-material3:1.0.0-alpha01")
+    
     // Testing
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")

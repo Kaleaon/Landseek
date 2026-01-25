@@ -640,12 +640,30 @@ model="ollama/llama3.2"
 model="ollama/mistral"
 model="ollama/phi"
 
+# LiquidAI LFM2.5 models (reasoning-optimized for edge)
+model="ollama/lfm2.5:1.2b-thinking"  # Best for RAG and agentic tasks
+model="ollama/lfm2.5:1.2b-instruct"  # General-purpose chat
+
 # Cloud models (require API key)
 model="gemini/gemini-2.0-flash"
 model="gemini/gemini-1.5-pro"
 model="gpt-4o"
 model="claude-sonnet-4"
 ```
+
+### LiquidAI LFM2.5 Models (Recommended for Reasoning)
+
+[LFM2.5-1.2B-Thinking](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking) is a compact reasoning model from LiquidAI that excels at:
+
+- **RAG workflows**: Optimized for retrieval-augmented generation with 32K context
+- **Agentic tasks**: Built-in tool use and function calling support
+- **On-device reasoning**: Fits under 1GB RAM with fast inference (239 tok/s on CPU)
+- **Chain-of-thought**: Explicit reasoning traces for complex problems
+
+| Model | Size | Best For |
+|-------|------|----------|
+| LFM2.5-1.2B-Thinking | ~900MB | RAG, agents, reasoning |
+| LFM2.5-1.2B-Instruct | ~900MB | General chat, Q&A |
 
 ### Pixel TPU Compatibility
 
@@ -654,6 +672,7 @@ model="claude-sonnet-4"
 | gemma3:2b | ~2GB | ⚡ Excellent (fastest) |
 | **gemma3:4b** | ~4GB | ⚡ Very Good (recommended) |
 | gemma3:8b | ~8GB | 🔄 Good (slower, more capable) |
+| lfm2.5:1.2b | ~900MB | ⚡ Excellent (reasoning-focused) |
 
 ## Architecture
 

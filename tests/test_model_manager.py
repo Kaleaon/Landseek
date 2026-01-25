@@ -136,6 +136,23 @@ class TestModelCatalog:
         assert "gemma3-4b-gguf" in MODEL_CATALOG
         assert "gemma3-1b-gguf" in MODEL_CATALOG
     
+    def test_lfm_models_exist(self):
+        """Test that LiquidAI LFM models exist"""
+        assert "lfm25-1.2b-thinking-gguf" in MODEL_CATALOG
+        assert "lfm25-1.2b-instruct-gguf" in MODEL_CATALOG
+    
+    def test_lfm_thinking_model_properties(self):
+        """Test LFM2.5 Thinking model properties"""
+        lfm_thinking = MODEL_CATALOG.get("lfm25-1.2b-thinking-gguf")
+        assert lfm_thinking is not None
+        assert "LiquidAI" in lfm_thinking.name or "LFM" in lfm_thinking.name
+        assert lfm_thinking.parameters == "1.2B"
+        assert lfm_thinking.size_category == ModelSize.SMALL
+        assert lfm_thinking.required_ram_mb <= 2048  # Should be lightweight
+        assert "reasoning" in lfm_thinking.tags
+        assert "rag" in lfm_thinking.tags
+        assert "agentic" in lfm_thinking.tags
+    
     def test_model_has_required_fields(self):
         """Test that models have required fields"""
         for model_id, model in MODEL_CATALOG.items():
@@ -157,6 +174,7 @@ class TestModelCatalog:
         """Test that at least one model has recommended tag"""
         has_recommended = any("recommended" in m.tags for m in MODEL_CATALOG.values())
         assert has_recommended
+
 
 
 class TestModelDownloadManager:

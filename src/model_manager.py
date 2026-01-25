@@ -247,6 +247,44 @@ MODEL_CATALOG: Dict[str, ModelInfo] = {
         homepage="https://github.com/jzhang38/TinyLlama",
         tags=["tinyllama", "ultra-lightweight", "fast"]
     ),
+    
+    # LiquidAI LFM2.5 Models (Reasoning-optimized for edge)
+    "lfm25-1.2b-thinking-gguf": ModelInfo(
+        id="lfm25-1.2b-thinking-gguf",
+        name="LFM2.5 1.2B Thinking (GGUF Q4)",
+        description="LiquidAI's reasoning model. Best-in-class for RAG, agentic tasks, and on-device reasoning under 1GB.",
+        size_bytes=900_000_000,  # ~900MB
+        size_category=ModelSize.SMALL,
+        format=ModelFormat.GGUF,
+        download_url="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Thinking-GGUF/resolve/main/lfm2.5-1.2b-thinking-q4_k_m.gguf",
+        sha256=None,
+        required_ram_mb=1536,
+        supports_tpu=False,
+        supports_gpu=True,
+        quantization="Q4_K_M",
+        parameters="1.2B",
+        license="Apache 2.0",
+        homepage="https://www.liquid.ai/",
+        tags=["liquidai", "reasoning", "rag", "agentic", "edge", "lightweight", "tool-use"]
+    ),
+    "lfm25-1.2b-instruct-gguf": ModelInfo(
+        id="lfm25-1.2b-instruct-gguf",
+        name="LFM2.5 1.2B Instruct (GGUF Q4)",
+        description="LiquidAI's instruction-tuned model. Great for general chat and knowledge tasks.",
+        size_bytes=900_000_000,  # ~900MB
+        size_category=ModelSize.SMALL,
+        format=ModelFormat.GGUF,
+        download_url="https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF/resolve/main/lfm2.5-1.2b-instruct-q4_k_m.gguf",
+        sha256=None,
+        required_ram_mb=1536,
+        supports_tpu=False,
+        supports_gpu=True,
+        quantization="Q4_K_M",
+        parameters="1.2B",
+        license="Apache 2.0",
+        homepage="https://www.liquid.ai/",
+        tags=["liquidai", "general-purpose", "chat", "lightweight"]
+    ),
 }
 
 

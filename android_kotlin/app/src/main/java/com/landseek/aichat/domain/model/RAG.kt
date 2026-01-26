@@ -19,6 +19,9 @@ package com.landseek.aichat.domain.model
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import java.io.File
 import java.security.MessageDigest
 import java.time.Instant
@@ -596,12 +599,38 @@ class AIRAGStore(
         try {
             val file = File(storageDir, "rag_$aiId.json")
             if (!file.exists()) return
-            
+
             val content = file.readText()
-            // Parse and load chunks
-            // This is simplified - full implementation would deserialize properly
+            if (content.isBlank()) return
+
+            // Parse the JSON data
+            val jsonElement = json.parseToJsonElement(content)
+            val jsonObject = jsonElement.jsonObject
+
+            // Deserialize chunks
+            val chunksArray = jsonObject["chunks"]?.jsonArray
+            if (chunksArray != null) {
+                for (chunkElement in chunksArray) {
+                    val chunk = json.decodeFromJsonElement<TextChunk>(chunkElement)
+                    chunks[chunk.chunkId] = chunk
+                }
+            }
+
+            // Deserialize stats
+            val statsElement = jsonObject["stats"]
+            if (statsElement != null) {
+                stats = json.decodeFromJsonElement<RAGStats>(statsElement)
+            }
+
+            // Re-fit embedding model if we have chunks
+            if (chunks.isNotEmpty()) {
+                val documents = chunks.values.map { it.content }
+                embedding.fit(documents)
+            }
         } catch (e: Exception) {
-            // Log error but don't crash
+            // Log error but don't crash - start with empty store
+            chunks.clear()
+            stats = RAGStats()
         }
     }
 }

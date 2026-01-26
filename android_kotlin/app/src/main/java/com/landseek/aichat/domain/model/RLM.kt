@@ -415,18 +415,86 @@ interface LLMProvider {
 
 /**
  * Ollama LLM Provider.
+ * Implements actual HTTP calls to Ollama API using OkHttp.
  */
 class OllamaProvider(
     private val model: String,
     private val baseUrl: String = "http://localhost:11434"
 ) : LLMProvider {
+
+    private val client = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+        .build()
+
+    private val json = kotlinx.serialization.json.Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+
     override suspend fun complete(messages: List<RLMMessage>, temperature: Float): String {
         return withContext(Dispatchers.IO) {
-            // TODO: Implement actual Ollama API calls using Retrofit/OkHttp
-            // POST to $baseUrl/api/chat with JSON body containing model, messages, etc.
-            // For now, returns placeholder - replace with real HTTP client implementation
-            throw NotImplementedError("Ollama API integration requires HTTP client setup. See: https://github.com/ollama/ollama/blob/main/docs/api.md")
+            try {
+                // Convert messages to Ollama format
+                val ollamaMessages = messages.map { msg ->
+                    mapOf(
+                        "role" to msg.role,
+                        "content" to msg.content
+                    )
+                }
+
+                // Build request body
+                val requestBody = mapOf(
+                    "model" to model,
+                    "messages" to ollamaMessages,
+                    "stream" to false,
+                    "options" to mapOf(
+                        "temperature" to temperature
+                    )
+                )
+
+                val jsonBody = com.google.gson.Gson().toJson(requestBody)
+                val mediaType = "application/json; charset=utf-8".toMediaType()
+                val body = jsonBody.toRequestBody(mediaType)
+
+                val request = okhttp3.Request.Builder()
+                    .url("$baseUrl/api/chat")
+                    .post(body)
+                    .build()
+
+                val response = client.newCall(request).execute()
+
+                if (!response.isSuccessful) {
+                    throw RLMError("Ollama API error: ${response.code} - ${response.message}")
+                }
+
+                val responseBody = response.body?.string()
+                    ?: throw RLMError("Empty response from Ollama")
+
+                // Parse response
+                val responseJson = com.google.gson.JsonParser.parseString(responseBody).asJsonObject
+                val messageObj = responseJson.getAsJsonObject("message")
+                messageObj.get("content")?.asString
+                    ?: throw RLMError("No content in Ollama response")
+
+            } catch (e: java.net.ConnectException) {
+                throw RLMError("Cannot connect to Ollama at $baseUrl. Is Ollama running?")
+            } catch (e: java.net.SocketTimeoutException) {
+                throw RLMError("Ollama request timed out. The model may be loading or the request is too complex.")
+            } catch (e: RLMError) {
+                throw e
+            } catch (e: Exception) {
+                throw RLMError("Ollama request failed: ${e.message}")
+            }
         }
+    }
+
+    companion object {
+        private fun String.toMediaType() = okhttp3.MediaType.parse(this)
+            ?: throw IllegalArgumentException("Invalid media type")
+        private fun String.toRequestBody(mediaType: okhttp3.MediaType?) =
+            okhttp3.RequestBody.create(mediaType, this)
     }
 }
 

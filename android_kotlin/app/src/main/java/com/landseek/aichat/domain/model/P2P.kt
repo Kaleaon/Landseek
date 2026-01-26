@@ -249,25 +249,86 @@ sealed class P2PConnectionState {
  * P2P Network Manager - Handles both hosting and joining rooms.
  */
 class P2PNetworkManager(
-    private val handler: P2PHandler = DefaultP2PHandler()
+    initialHandler: P2PHandler = DefaultP2PHandler()
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    
+
     private val _connectionState = MutableStateFlow<P2PConnectionState>(P2PConnectionState.Disconnected)
     val connectionState: StateFlow<P2PConnectionState> = _connectionState.asStateFlow()
-    
+
     private val _peers = MutableStateFlow<Map<String, PeerInfo>>(emptyMap())
     val peers: StateFlow<Map<String, PeerInfo>> = _peers.asStateFlow()
-    
+
     private val _messages = MutableSharedFlow<P2PMessage>(replay = 100)
     val messages: SharedFlow<P2PMessage> = _messages.asSharedFlow()
-    
+
     private var peerId: String = UUID.randomUUID().toString()
     private var roomCode: String = ""
     private var roomName: String = "AI Chat Room"
     private var isHost: Boolean = false
     private var running: Boolean = false
-    
+
+    // Mutable handler registry - allows dynamic handler registration
+    private val handlers = mutableListOf<P2PHandler>(initialHandler)
+    private var primaryHandler: P2PHandler = initialHandler
+
+    /**
+     * Register a new handler. Returns the handler count.
+     */
+    fun registerHandler(handler: P2PHandler): Int {
+        if (!handlers.contains(handler)) {
+            handlers.add(handler)
+        }
+        return handlers.size
+    }
+
+    /**
+     * Unregister a handler. Returns remaining handler count.
+     */
+    fun unregisterHandler(handler: P2PHandler): Int {
+        handlers.remove(handler)
+        if (handlers.isEmpty()) {
+            handlers.add(DefaultP2PHandler())
+        }
+        return handlers.size
+    }
+
+    /**
+     * Set the primary handler for main event dispatch.
+     */
+    fun setPrimaryHandler(handler: P2PHandler) {
+        primaryHandler = handler
+        if (!handlers.contains(handler)) {
+            handlers.add(handler)
+        }
+    }
+
+    /**
+     * Get registered handler count.
+     */
+    fun getRegisteredHandlerCount(): Int = handlers.filter { it !is DefaultP2PHandler }.size
+
+    /**
+     * Clear all handlers and reset to default.
+     */
+    fun clearHandlers() {
+        handlers.clear()
+        handlers.add(DefaultP2PHandler())
+        primaryHandler = handlers.first()
+    }
+
+    // Helper to dispatch to all handlers
+    private fun dispatchToHandlers(action: (P2PHandler) -> Unit) {
+        handlers.forEach { handler ->
+            try {
+                action(handler)
+            } catch (e: Exception) {
+                // Log error but continue dispatching to other handlers
+                println("Handler error: ${e.message}")
+            }
+        }
+    }
+
     // WebSocket connections would go here
     // Using org.java_websocket:Java-WebSocket library
     
@@ -497,12 +558,12 @@ class P2PNetworkManager(
     private fun cleanupDeadPeers() {
         val currentPeers = _peers.value.toMutableMap()
         val deadPeers = currentPeers.filter { !it.value.isAlive() }
-        
+
         deadPeers.forEach { (id, peer) ->
             currentPeers.remove(id)
-            handler.onPeerDisconnected(peer)
+            dispatchToHandlers { it.onPeerDisconnected(peer) }
         }
-        
+
         _peers.value = currentPeers
     }
     
@@ -545,8 +606,8 @@ class P2PNetworkManager(
         )
         
         _peers.value = _peers.value + (message.senderId to peer)
-        handler.onPeerConnected(peer)
-        
+        dispatchToHandlers { it.onPeerConnected(peer) }
+
         // Send acknowledgment
         val ack = P2PMessage(
             type = P2PMessageType.HANDSHAKE_ACK.value,
@@ -586,43 +647,43 @@ class P2PNetworkManager(
         val peer = _peers.value[message.senderId]
         if (peer != null) {
             _peers.value = _peers.value - message.senderId
-            handler.onPeerDisconnected(peer)
+            dispatchToHandlers { it.onPeerDisconnected(peer) }
         }
     }
     
     private fun handleChatMessage(message: P2PMessage) {
         val content = message.payload["content"] ?: ""
         val senderName = message.payload["sender_name"] ?: "Unknown"
-        handler.onChatMessage(message.senderId, senderName, content)
+        dispatchToHandlers { it.onChatMessage(message.senderId, senderName, content) }
     }
     
     private fun handleAiRequest(message: P2PMessage) {
         if (!isHost) return
-        
+
         val requestId = message.payload["request_id"] ?: ""
         val aiName = message.payload["ai_name"] ?: ""
         val prompt = message.payload["prompt"] ?: ""
-        handler.onAiRequest(requestId, message.senderId, aiName, prompt)
+        dispatchToHandlers { it.onAiRequest(requestId, message.senderId, aiName, prompt) }
     }
     
     private fun handleAiResponse(message: P2PMessage) {
         val requestId = message.payload["request_id"] ?: ""
         val aiName = message.payload["ai_name"] ?: ""
         val response = message.payload["response"] ?: ""
-        handler.onAiResponse(requestId, aiName, response)
+        dispatchToHandlers { it.onAiResponse(requestId, aiName, response) }
     }
-    
+
     private fun handlePrivateMessage(message: P2PMessage) {
         val content = message.payload["content"] ?: ""
         val senderName = message.payload["sender_name"] ?: "Unknown"
         val recipientId = message.payload["recipient_id"] ?: ""
-        handler.onPrivateMessage(message.senderId, senderName, recipientId, content)
+        dispatchToHandlers { it.onPrivateMessage(message.senderId, senderName, recipientId, content) }
     }
     
     private fun handlePeerJoined(message: P2PMessage) {
         val peerId = message.payload["peer_id"] ?: return
         val name = message.payload["name"] ?: "Unknown"
-        
+
         val peer = PeerInfo(
             peerId = peerId,
             name = name,
@@ -630,25 +691,26 @@ class P2PNetworkManager(
             address = "",
             port = 0
         )
-        
+
         _peers.value = _peers.value + (peerId to peer)
-        handler.onPeerConnected(peer)
+        dispatchToHandlers { it.onPeerConnected(peer) }
     }
-    
+
     private fun handlePeerLeft(message: P2PMessage) {
         val peerId = message.payload["peer_id"] ?: return
         val peer = _peers.value[peerId]
         if (peer != null) {
             _peers.value = _peers.value - peerId
-            handler.onPeerDisconnected(peer)
+            dispatchToHandlers { it.onPeerDisconnected(peer) }
         }
     }
-    
+
     private fun handleSyncRequest(message: P2PMessage) {
         val syncType = message.payload["sync_type"] ?: return
         @Suppress("UNCHECKED_CAST")
-        val response = handler.onSyncRequest(syncType, message.payload as Map<String, Any>)
-        
+        // Use primary handler for sync requests (returns a response)
+        val response = primaryHandler.onSyncRequest(syncType, message.payload as Map<String, Any>)
+
         val responseMessage = P2PMessage(
             type = P2PMessageType.SYNC_RESPONSE.value,
             senderId = peerId,
@@ -656,14 +718,14 @@ class P2PNetworkManager(
         )
         sendToPeer(message.senderId, responseMessage)
     }
-    
+
     private fun handleSyncResponse(message: P2PMessage) {
         // Handle sync response data
     }
-    
+
     private fun handleError(message: P2PMessage) {
         val error = message.payload["error"] ?: "Unknown error"
-        handler.onError(error)
+        dispatchToHandlers { it.onError(error) }
     }
 }
 

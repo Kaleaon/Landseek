@@ -474,21 +474,40 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readPdfFile(file: File): DocumentReadResult {
-        // TODO: Implement PDF text extraction using com.tom_roush:pdfbox-android
-        // Add dependency: implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-        // Usage: PDDocument.load(file) -> pdfStripper.getText(document)
         return try {
-            val metadata = mapOf(
+            // Use pdfbox-android for PDF text extraction
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(file)
+            val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+            val text = stripper.getText(document)
+            val pageCount = document.numberOfPages
+
+            // Extract metadata
+            val info = document.documentInformation
+            val title = info?.title ?: file.nameWithoutExtension
+            val author = info?.author
+
+            val metadata = mutableMapOf(
                 "path" to file.absolutePath,
-                "size" to file.length().toString()
+                "size" to file.length().toString(),
+                "pages" to pageCount.toString()
             )
-            
+            info?.creationDate?.let { metadata["created"] = it.time.toString() }
+            info?.modificationDate?.let { metadata["modified"] = it.time.toString() }
+
+            document.close()
+
+            if (text.length > MAX_TEXT_SIZE) {
+                return DocumentReadResult.Error("PDF too large (max ${MAX_TEXT_SIZE} characters). Consider splitting the document.")
+            }
+
             DocumentReadResult.Success(
                 DocumentContent(
-                    text = "[PDF Document: ${file.name}]\n\n⚠️ PDF text extraction requires pdfbox-android library. Add 'com.tom-roush:pdfbox-android:2.0.27.0' to dependencies.",
-                    title = file.nameWithoutExtension,
+                    text = text,
+                    title = title,
+                    author = author,
                     sourceType = "file",
                     originalFormat = "pdf",
+                    pages = pageCount,
                     metadata = metadata
                 )
             )

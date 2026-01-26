@@ -272,7 +272,7 @@ class ModelManager(
     fun formatModelList(models: List<ModelInfo>): String {
         val sb = StringBuilder()
         sb.appendLine("Available Models:")
-        sb.appendLine("=" .repeat(50))
+        sb.appendLine("=".repeat(50))
         
         for (model in models) {
             sb.appendLine()

@@ -58,6 +58,16 @@ data class Tool(
     val category: String = "general"
 ) {
     /**
+     * Convert to ToolDefinition for use with RLM/Addons.
+     */
+    fun toToolDefinition(): ToolDefinition = ToolDefinition(
+        name = name,
+        description = description,
+        parameters = parameters,
+        execute = function,
+        category = category
+    )
+    /**
      * Convert tool to OpenAI-compatible function schema.
      */
     fun toSchema(): Map<String, Any> = mapOf(
@@ -89,6 +99,44 @@ data class Tool(
         }
     }
 }
+
+/**
+ * Tool definition for use with RLM and Add-ons.
+ *
+ * This is the primary interface used by RLM.kt and Addons.kt for tool definitions.
+ * Unlike Tool, this uses 'execute' as the function property name for clarity.
+ */
+data class ToolDefinition(
+    val name: String,
+    val description: String,
+    val parameters: Map<String, ToolParameter>,
+    val execute: (Map<String, Any?>) -> ToolResult,
+    val category: String = "general"
+) {
+    /**
+     * Convert to Tool for use with ToolRegistry.
+     */
+    fun toTool(): Tool = Tool(
+        name = name,
+        description = description,
+        parameters = parameters,
+        function = execute,
+        category = category
+    )
+}
+
+/**
+ * Definition for an AI personality (used by Add-ons).
+ */
+data class PersonalityDefinition(
+    val id: String,
+    val name: String,
+    val description: String,
+    val systemPrompt: String,
+    val traits: List<String> = emptyList(),
+    val temperature: Float = 0.7f,
+    val icon: String? = null
+)
 
 /**
  * Registry for managing available tools.

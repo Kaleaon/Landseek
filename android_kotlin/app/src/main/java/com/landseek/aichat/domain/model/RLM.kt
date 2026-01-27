@@ -328,7 +328,8 @@ fun isFinal(response: String): Boolean {
 fun buildSystemPrompt(
     personality: String = "",
     tools: List<ToolDefinition> = emptyList(),
-    userName: String = "User"
+    userName: String = "User",
+    subconsciousContext: String = ""
 ): String {
     val toolsSection = if (tools.isNotEmpty()) {
         val toolDescriptions = tools.joinToString("\n") { tool ->
@@ -351,17 +352,26 @@ fun buildSystemPrompt(
         """.trimIndent()
     } else ""
     
+    val subconsciousSection = if (subconsciousContext.isNotBlank()) {
+        """
+
+        ## Memory & Context
+        $subconsciousContext
+        """.trimIndent()
+    } else ""
+
     return """
     You are an AI assistant in a chat room. $personality
-    
+    $subconsciousSection
+
     You can think step-by-step using <thinking></thinking> tags.
     When you have a final answer, wrap it in <answer></answer> tags.
-    
+
     If you need to execute code or calculations, use <code></code> tags.
     $toolsSection
-    
+
     Current user: $userName
-    
+
     Remember to be helpful, accurate, and respectful.
     """.trimIndent()
 }
@@ -373,9 +383,10 @@ fun buildRAGSystemPrompt(
     personality: String = "",
     context: String,
     tools: List<ToolDefinition> = emptyList(),
-    userName: String = "User"
+    userName: String = "User",
+    subconsciousContext: String = ""
 ): String {
-    val basePrompt = buildSystemPrompt(personality, tools, userName)
+    val basePrompt = buildSystemPrompt(personality, tools, userName, subconsciousContext)
     
     return """
     $basePrompt
@@ -442,7 +453,8 @@ class RLM(
     private val maxIterations: Int = 30,
     private val ragStore: AIRAGStore? = null,
     private val aiName: String = "AI",
-    private val llmProvider: LLMProvider? = null
+    private val llmProvider: LLMProvider? = null,
+    private val subconscious: AISubconscious? = null
 ) {
     private var currentDepth = 0
     private val repl = REPLExecutor()
@@ -480,16 +492,22 @@ class RLM(
         
         // Build messages
         val messages = mutableListOf<RLMMessage>()
-        
-        // System prompt with optional RAG context
+
+        // Get subconscious context if available
+        val subconsciousContext = subconscious?.buildContextForPrompt() ?: ""
+
+        // System prompt with optional RAG context and subconscious
         val systemPrompt = if (ragStore != null && context.isNotEmpty()) {
             // Get relevant context from RAG
             val ragResults = ragStore.retrieve(context, topK = 5)
             val ragContext = ragResults.joinToString("\n\n") { it.chunk.content }
-            buildRAGSystemPrompt(aiName, ragContext, tools)
+            buildRAGSystemPrompt(aiName, ragContext, tools, subconsciousContext = subconsciousContext)
         } else {
-            buildSystemPrompt(aiName, tools)
+            buildSystemPrompt(aiName, tools, subconsciousContext = subconsciousContext)
         }
+
+        // Record user message in subconscious
+        subconscious?.recordMessage("user", query.ifEmpty { context })
         
         messages.add(RLMMessage(role = MessageRole.SYSTEM.value, content = systemPrompt))
         
@@ -520,6 +538,8 @@ class RLM(
             
             // If final, return answer
             if (parsed.isFinal && parsed.answer != null) {
+                // Record assistant response in subconscious
+                subconscious?.recordMessage("assistant", parsed.answer)
                 return parsed.answer
             }
             
@@ -556,7 +576,8 @@ class RLM(
                     maxIterations = maxIterations - iterationCount,
                     ragStore = ragStore,
                     aiName = aiName,
-                    llmProvider = llmProvider
+                    llmProvider = llmProvider,
+                    subconscious = subconscious
                 )
                 nestedRlm.currentDepth = currentDepth + 1
             }
@@ -642,13 +663,15 @@ fun createRLM(
     model: String = "gemma3:4b",
     aiName: String = "AI",
     ragStore: AIRAGStore? = null,
-    ollamaUrl: String = "http://localhost:11434"
+    ollamaUrl: String = "http://localhost:11434",
+    subconscious: AISubconscious? = null
 ): RLM {
     return RLM(
         model = model,
         apiBase = ollamaUrl,
         ragStore = ragStore,
         aiName = aiName,
-        llmProvider = OllamaProvider(model, ollamaUrl)
+        llmProvider = OllamaProvider(model, ollamaUrl),
+        subconscious = subconscious
     )
 }

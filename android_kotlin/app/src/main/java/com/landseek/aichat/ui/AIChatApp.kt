@@ -20,6 +20,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.landseek.aichat.ui.chat.ChatScreen
 import com.landseek.aichat.ui.chat.ChatViewModel
+import com.landseek.aichat.ui.chat.AISelectorDialog
+import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
 import com.landseek.aichat.ui.participants.ParticipantsScreen
 import com.landseek.aichat.ui.settings.SettingsScreen
 import com.landseek.aichat.ui.documents.DocumentsScreen
@@ -53,6 +55,8 @@ fun AIChatApp() {
     val viewModel: ChatViewModel = hiltViewModel()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var showAiSelector by remember { mutableStateOf(false) }
+    val activeAIs by viewModel.activeAIs.collectAsState()
     
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -104,7 +108,7 @@ fun AIChatApp() {
                     },
                     actions = {
                         if (currentRoute == Screen.Chat.route) {
-                            IconButton(onClick = { /* TODO: Show AI selector */ }) {
+                            IconButton(onClick = { showAiSelector = true }) {
                                 Icon(Icons.Default.PersonAdd, contentDescription = "Add AI")
                             }
                         }
@@ -144,5 +148,20 @@ fun AIChatApp() {
                 composable(Screen.Settings.route) { SettingsScreen() }
             }
         }
+    }
+
+    if (showAiSelector) {
+        AISelectorDialog(
+            onDismiss = { showAiSelector = false },
+            availableAIs = BUILTIN_PERSONALITIES,
+            activeAIs = activeAIs,
+            onAISelected = { id, selected ->
+                if (selected) {
+                    viewModel.addAI(id)
+                } else {
+                    viewModel.removeAI(id)
+                }
+            }
+        )
     }
 }

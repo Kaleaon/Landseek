@@ -18,14 +18,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import android.widget.Toast
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.landseek.aichat.domain.model.*
 import com.landseek.aichat.ui.theme.*
 import kotlinx.coroutines.launch
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
     var userName by remember { mutableStateOf("User") }
     var selectedModel by remember { mutableStateOf("gemma3-4b-gguf") }
     var ollamaUrl by remember { mutableStateOf("http://localhost:11434") }
@@ -280,11 +285,15 @@ fun SettingsScreen() {
             
             Spacer(Modifier.height(8.dp))
             
+            val context = LocalContext.current
             SettingsButton(
                 label = "Clear History",
                 description = "Delete all chat messages",
                 icon = Icons.Default.Delete,
-                onClick = { /* TODO */ },
+                onClick = {
+                    viewModel.clearHistory()
+                    Toast.makeText(context, "History cleared", Toast.LENGTH_SHORT).show()
+                },
                 isDestructive = true
             )
         }

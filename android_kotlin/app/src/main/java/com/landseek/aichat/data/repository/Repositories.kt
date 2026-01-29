@@ -42,6 +42,9 @@ class MessageRepository @Inject constructor(
     
     suspend fun getMessageCount(): Int = 
         messageDao.getMessageCount()
+
+    suspend fun deleteAllMessages() =
+        messageDao.deleteAllMessages()
 }
 
 /**

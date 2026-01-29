@@ -11,6 +11,7 @@ package com.landseek.aichat.ui.chat
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.landseek.aichat.data.model.AIStateEntity
 import com.landseek.aichat.data.repository.MessageRepository
 import com.landseek.aichat.data.repository.AIStateRepository
 import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
@@ -62,20 +63,47 @@ class ChatViewModel @Inject constructor(
     val currentThought: StateFlow<String> = _currentThought.asStateFlow()
     
     init {
-        initializeDefaultAIs()
+        initializeAIs()
         loadWelcomeMessages()
     }
     
-    private fun initializeDefaultAIs() {
-        val defaultAIs = BUILTIN_PERSONALITIES.take(3).map { p ->
-            ActiveAI(
-                id = p.name.lowercase(),
-                name = p.name,
+    private fun initializeAIs() {
+        viewModelScope.launch {
+            // Seed database if empty
+            val allStates = aiStateRepository.getAllStates().firstOrNull()
+            if (allStates.isNullOrEmpty()) {
+                seedDatabase()
+            }
+
+            // Observe active states
+            aiStateRepository.getActiveStates().collect { entities ->
+                _activeAIs.value = entities.map { entity ->
+                    ActiveAI(
+                        id = entity.aiId,
+                        name = entity.displayName,
+                        avatar = entity.avatar,
+                        isActive = entity.isActive
+                    )
+                }
+            }
+        }
+    }
+
+    private suspend fun seedDatabase() {
+        val defaults = BUILTIN_PERSONALITIES.mapIndexed { index, p ->
+            AIStateEntity(
+                aiId = p.name.lowercase(),
+                displayName = p.name,
+                originalName = p.name,
+                personality = p.personality,
                 avatar = p.avatar,
-                isActive = true
+                tags = p.tags.toString(),
+                isActive = index < 3, // First 3 active
+                memories = "[]",
+                relationships = "{}"
             )
         }
-        _activeAIs.value = defaultAIs
+        aiStateRepository.insertAll(defaults)
     }
     
     private fun loadWelcomeMessages() {
@@ -266,25 +294,40 @@ class ChatViewModel @Inject constructor(
     }
     
     fun toggleAI(aiId: String) {
-        _activeAIs.value = _activeAIs.value.map { ai ->
-            if (ai.id == aiId) ai.copy(isActive = !ai.isActive)
-            else ai
+        viewModelScope.launch {
+            val isActive = _activeAIs.value.any { it.id == aiId }
+            aiStateRepository.setActive(aiId, !isActive)
         }
     }
     
     fun addAI(aiId: String) {
-        val personality = BUILTIN_PERSONALITIES.find { it.name.lowercase() == aiId }
-        if (personality != null && _activeAIs.value.none { it.id == aiId }) {
-            _activeAIs.value = _activeAIs.value + ActiveAI(
-                id = aiId,
-                name = personality.name,
-                avatar = personality.avatar,
-                isActive = true
-            )
+        viewModelScope.launch {
+            val exists = aiStateRepository.getByAiId(aiId) != null
+            if (exists) {
+                aiStateRepository.setActive(aiId, true)
+            } else {
+                val personality = BUILTIN_PERSONALITIES.find { it.name.lowercase() == aiId }
+                if (personality != null) {
+                    val entity = AIStateEntity(
+                        aiId = personality.name.lowercase(),
+                        displayName = personality.name,
+                        originalName = personality.name,
+                        personality = personality.personality,
+                        avatar = personality.avatar,
+                        tags = personality.tags.toString(),
+                        isActive = true,
+                        memories = "[]",
+                        relationships = "{}"
+                    )
+                    aiStateRepository.insert(entity)
+                }
+            }
         }
     }
     
     fun removeAI(aiId: String) {
-        _activeAIs.value = _activeAIs.value.filter { it.id != aiId }
+        viewModelScope.launch {
+            aiStateRepository.setActive(aiId, false)
+        }
     }
 }

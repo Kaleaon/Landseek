@@ -8,6 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,6 +34,7 @@ fun DocumentsScreen(
     val documents by viewModel.documents.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     var selectedDocument by remember { mutableStateOf<DocumentEntity?>(null) }
+    var viewingDocument by remember { mutableStateOf<DocumentEntity?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     
@@ -155,10 +158,22 @@ fun DocumentsScreen(
                     viewModel.analyzeDocument(document)
                     selectedDocument = null
                 },
+                onViewContent = {
+                    viewingDocument = document
+                    selectedDocument = null
+                },
                 onDelete = {
                     viewModel.deleteDocument(document)
                     selectedDocument = null
                 }
+            )
+        }
+
+        // Document content viewer
+        viewingDocument?.let { document ->
+            DocumentViewer(
+                document = document,
+                onDismiss = { viewingDocument = null }
             )
         }
     }
@@ -246,6 +261,7 @@ fun DocumentDetailSheet(
     document: DocumentEntity,
     onDismiss: () -> Unit,
     onAnalyze: () -> Unit,
+    onViewContent: () -> Unit,
     onDelete: () -> Unit
 ) {
     ModalBottomSheet(
@@ -299,7 +315,7 @@ fun DocumentDetailSheet(
             Spacer(Modifier.height(8.dp))
             
             OutlinedButton(
-                onClick = { /* TODO: View content */ },
+                onClick = onViewContent,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Visibility, contentDescription = null)
@@ -322,6 +338,46 @@ fun DocumentDetailSheet(
             Spacer(Modifier.height(32.dp))
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DocumentViewer(
+    document: Document,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = document.name,
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = document.content ?: "No content available",
+                    color = AITextSecondary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = AIPrimary)
+            }
+        },
+        containerColor = AISurface,
+        textContentColor = AITextSecondary,
+        titleContentColor = Color.White
+    )
 }
 
 private fun formatFileSize(bytes: Long): String {

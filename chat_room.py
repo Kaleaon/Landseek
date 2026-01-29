@@ -632,7 +632,7 @@ Previous private messages:
 Respond privately to {from_participant}. Be personal and direct."""
 
         try:
-            response = ai.rlm.completion(query=query, context="Private conversation")
+            response = await ai.rlm.acompletion(query=query, context="Private conversation")
             
             # Save to state
             msg = self.send_private_message(ai.display_name, from_participant, response)
@@ -1091,7 +1091,7 @@ Respond briefly and naturally (1-3 sentences). Stay in character."""
         try:
             # Use document content as RLM context for deep processing
             rlm_context = doc_context if doc_context else "Chat room context"
-            response = ai.rlm.completion(query=query, context=rlm_context)
+            response = await ai.rlm.acompletion(query=query, context=rlm_context)
             
             # Check if AI used any tools
             if self.enable_tools:
@@ -1147,7 +1147,7 @@ Analyze the following document and respond to this request:
 Provide a thorough but concise analysis. Stay in character."""
 
         try:
-            response = ai.rlm.completion(query=query, context=doc.content)
+            response = await ai.rlm.acompletion(query=query, context=doc.content)
             msg = await self.send_message(ai.display_name, f"📊 Analysis: {response}")
             return msg
         except Exception as e:

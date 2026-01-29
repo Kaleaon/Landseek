@@ -751,7 +751,14 @@ class TestMemRL:
         store.chunks[chunk_id].q_value = 0.8
         store.chunks[chunk_id].retrieval_count = 5
         store.chunks[chunk_id].success_count = 3
-        store._save()
+
+        # Manually persist changes for test (since _save() no longer saves chunks)
+        with store.conn:
+            store.conn.execute("""
+                UPDATE chunks
+                SET q_value = 0.8, retrieval_count = 5, success_count = 3
+                WHERE chunk_id = ?
+            """, (chunk_id,))
         
         # Create new store instance (should load from disk)
         store2 = AIRAGStore("test", temp_dir)
@@ -846,7 +853,11 @@ class TestMemRL:
         if len(chunk_ids) >= 2:
             store.chunks[chunk_ids[0]].q_value = 0.9  # High Q-value
             store.chunks[chunk_ids[1]].q_value = 0.1  # Low Q-value
-            store._save()
+
+            # Manually persist changes for test
+            with store.conn:
+                store.conn.execute("UPDATE chunks SET q_value = 0.9 WHERE chunk_id = ?", (chunk_ids[0],))
+                store.conn.execute("UPDATE chunks SET q_value = 0.1 WHERE chunk_id = ?", (chunk_ids[1],))
             
             # MemRL should favor high Q-value chunks
             results = store.retrieve("Python", strategy=RetrievalStrategy.MEMRL)

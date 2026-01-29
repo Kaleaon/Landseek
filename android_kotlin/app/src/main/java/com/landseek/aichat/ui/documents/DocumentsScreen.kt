@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.landseek.aichat.ui.theme.*
+import kotlinx.coroutines.launch
 
 data class Document(
     val id: Long,
@@ -38,94 +39,115 @@ fun DocumentsScreen() {
         )
     }
     var selectedDocument by remember { mutableStateOf<Document?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AIBackground)
-    ) {
-        // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column {
-                Text(
-                    text = "Documents",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.White
-                )
-                Text(
-                    text = "${documents.size} files uploaded",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AITextSecondary
-                )
-            }
-            
-            FloatingActionButton(
-                onClick = { /* TODO: Upload document */ },
-                containerColor = AIPrimary
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Upload")
-            }
+    val handleAnalyze: (Document) -> Unit = { doc ->
+        scope.launch {
+            snackbarHostState.showSnackbar(
+                message = "Analyzing ${doc.name}...",
+                duration = SnackbarDuration.Short
+            )
         }
-        
-        HorizontalDivider(color = AIDivider)
-        
-        // Document list
-        if (documents.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        containerColor = AIBackground,
+        modifier = Modifier.fillMaxSize()
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
+            // Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Description,
-                        contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = AITextSecondary
-                    )
-                    Spacer(Modifier.height(16.dp))
+                Column {
                     Text(
-                        text = "No documents uploaded",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = AITextSecondary
+                        text = "Documents",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Color.White
                     )
                     Text(
-                        text = "Tap + to add a document",
+                        text = "${documents.size} files uploaded",
                         style = MaterialTheme.typography.bodySmall,
                         color = AITextSecondary
                     )
                 }
+
+                FloatingActionButton(
+                    onClick = { /* TODO: Upload document */ },
+                    containerColor = AIPrimary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Upload")
+                }
             }
-        } else {
-            LazyColumn(
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(documents) { document ->
-                    DocumentCard(
-                        document = document,
-                        onClick = { selectedDocument = document }
-                    )
+
+            HorizontalDivider(color = AIDivider)
+
+            // Document list
+            if (documents.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = null,
+                            modifier = Modifier.size(64.dp),
+                            tint = AITextSecondary
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = "No documents uploaded",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AITextSecondary
+                        )
+                        Text(
+                            text = "Tap + to add a document",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AITextSecondary
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(documents) { document ->
+                        DocumentCard(
+                            document = document,
+                            onClick = { selectedDocument = document },
+                            onQuickAnalyze = { handleAnalyze(document) }
+                        )
+                    }
                 }
             }
         }
-    }
-    
-    // Document detail sheet
-    selectedDocument?.let { document ->
-        DocumentDetailSheet(
-            document = document,
-            onDismiss = { selectedDocument = null },
-            onAnalyze = { /* TODO */ },
-            onDelete = { /* TODO */ }
-        )
+
+        // Document detail sheet
+        selectedDocument?.let { document ->
+            DocumentDetailSheet(
+                document = document,
+                onDismiss = { selectedDocument = null },
+                onAnalyze = {
+                    handleAnalyze(document)
+                    selectedDocument = null
+                },
+                onDelete = { /* TODO */ }
+            )
+        }
     }
 }
 
@@ -134,6 +156,7 @@ fun DocumentsScreen() {
 fun DocumentCard(
     document: Document,
     onClick: () -> Unit,
+    onQuickAnalyze: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val icon = when {
@@ -193,7 +216,7 @@ fun DocumentCard(
             }
             
             // Actions
-            IconButton(onClick = { /* TODO: Quick analyze */ }) {
+            IconButton(onClick = onQuickAnalyze) {
                 Icon(
                     imageVector = Icons.Default.AutoAwesome,
                     contentDescription = "Analyze",

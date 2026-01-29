@@ -18,6 +18,7 @@ import math
 import os
 import re
 import hashlib
+import sqlite3
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -475,9 +476,36 @@ class AIRAGStore:
         # Ensure storage directory exists
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
+        # Initialize database
+        self._init_db()
+
         # Load existing data
         self._load()
     
+    def _init_db(self) -> None:
+        """Initialize SQLite database."""
+        db_path = self.storage_dir / "rag.db"
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.conn.row_factory = sqlite3.Row
+
+        # Create chunks table
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS chunks (
+                    chunk_id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    source TEXT,
+                    source_type TEXT,
+                    timestamp TEXT,
+                    token_count INTEGER,
+                    metadata TEXT,
+                    embedding TEXT,
+                    q_value REAL DEFAULT 0.5,
+                    retrieval_count INTEGER DEFAULT 0,
+                    success_count INTEGER DEFAULT 0
+                )
+            """)
+
     def _get_chunks_file(self) -> Path:
         return self.storage_dir / "chunks.json"
     
@@ -490,20 +518,83 @@ class AIRAGStore:
     def _get_vocab_file(self) -> Path:
         return self.storage_dir / "vocab.json"
     
+    def _load_chunks_from_db(self) -> None:
+        """Load chunks from SQLite database."""
+        try:
+            with self.conn:
+                cursor = self.conn.execute("SELECT * FROM chunks")
+                for row in cursor:
+                    try:
+                        metadata = json.loads(row["metadata"]) if row["metadata"] else {}
+                        embedding = json.loads(row["embedding"]) if row["embedding"] else None
+
+                        chunk = TextChunk(
+                            chunk_id=row["chunk_id"],
+                            content=row["content"],
+                            source=row["source"],
+                            source_type=row["source_type"],
+                            timestamp=row["timestamp"],
+                            token_count=row["token_count"],
+                            metadata=metadata,
+                            embedding=embedding,
+                            q_value=row["q_value"],
+                            retrieval_count=row["retrieval_count"],
+                            success_count=row["success_count"]
+                        )
+                        self.chunks[chunk.chunk_id] = chunk
+                    except Exception as e:
+                        logger.error(f"Error loading chunk {row['chunk_id']}: {e}")
+        except sqlite3.Error as e:
+            logger.error(f"Database error loading chunks: {e}")
+
     def _load(self) -> None:
         """Load data from disk."""
-        # Load chunks
-        chunks_file = self._get_chunks_file()
-        if chunks_file.exists():
-            try:
-                with open(chunks_file, 'r') as f:
-                    data = json.load(f)
-                self.chunks = {
-                    chunk_id: TextChunk.from_dict(chunk_data)
-                    for chunk_id, chunk_data in data.items()
-                }
-            except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"Could not load chunks for {self.ai_id}: {e}")
+        # Try loading from DB first
+        self._load_chunks_from_db()
+
+        # If DB is empty, check for legacy JSON file
+        if not self.chunks:
+            chunks_file = self._get_chunks_file()
+            if chunks_file.exists():
+                try:
+                    with open(chunks_file, 'r') as f:
+                        data = json.load(f)
+
+                    # Load into memory
+                    self.chunks = {
+                        chunk_id: TextChunk.from_dict(chunk_data)
+                        for chunk_id, chunk_data in data.items()
+                    }
+
+                    # Migrate to DB
+                    logger.info(f"Migrating {len(self.chunks)} chunks from JSON to SQLite for {self.ai_id}")
+                    with self.conn:
+                        for chunk in self.chunks.values():
+                            self.conn.execute("""
+                                INSERT OR REPLACE INTO chunks (
+                                    chunk_id, content, source, source_type, timestamp,
+                                    token_count, metadata, embedding, q_value,
+                                    retrieval_count, success_count
+                                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                chunk.chunk_id,
+                                chunk.content,
+                                chunk.source,
+                                chunk.source_type,
+                                chunk.timestamp,
+                                chunk.token_count,
+                                json.dumps(chunk.metadata),
+                                json.dumps(chunk.embedding) if chunk.embedding else None,
+                                chunk.q_value,
+                                chunk.retrieval_count,
+                                chunk.success_count
+                            ))
+
+                    # Backup legacy file
+                    chunks_file.rename(chunks_file.with_suffix(".json.bak"))
+
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"Could not load chunks for {self.ai_id}: {e}")
         
         # Load keyword index
         index_file = self._get_index_file()
@@ -543,10 +634,7 @@ class AIRAGStore:
     
     def _save(self) -> None:
         """Save data to disk."""
-        # Save chunks
-        chunks_data = {chunk_id: chunk.to_dict() for chunk_id, chunk in self.chunks.items()}
-        with open(self._get_chunks_file(), 'w') as f:
-            json.dump(chunks_data, f)
+        # Note: Chunks are now saved to SQLite incrementally.
         
         # Save keyword index
         with open(self._get_index_file(), 'w') as f:
@@ -754,6 +842,31 @@ class AIRAGStore:
         # Add to storage
         self.chunks[chunk.chunk_id] = chunk
         
+        # Add to SQLite
+        try:
+            with self.conn:
+                self.conn.execute("""
+                    INSERT OR REPLACE INTO chunks (
+                        chunk_id, content, source, source_type, timestamp,
+                        token_count, metadata, embedding, q_value,
+                        retrieval_count, success_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    chunk.chunk_id,
+                    chunk.content,
+                    chunk.source,
+                    chunk.source_type,
+                    chunk.timestamp,
+                    chunk.token_count,
+                    json.dumps(chunk.metadata),
+                    json.dumps(chunk.embedding) if chunk.embedding else None,
+                    chunk.q_value,
+                    chunk.retrieval_count,
+                    chunk.success_count
+                ))
+        except sqlite3.Error as e:
+            logger.error(f"Error saving chunk {chunk.chunk_id} to DB: {e}")
+
         # Add to keyword index
         self.keyword_index.add(chunk.chunk_id, chunk.content)
         
@@ -769,6 +882,14 @@ class AIRAGStore:
             return False
         
         del self.chunks[chunk_id]
+
+        # Remove from SQLite
+        try:
+            with self.conn:
+                self.conn.execute("DELETE FROM chunks WHERE chunk_id = ?", (chunk_id,))
+        except sqlite3.Error as e:
+            logger.error(f"Error removing chunk {chunk_id} from DB: {e}")
+
         self.keyword_index.remove(chunk_id)
         self._update_stats()
         
@@ -1000,6 +1121,14 @@ class AIRAGStore:
     def clear(self) -> None:
         """Clear all data from the RAG store."""
         self.chunks.clear()
+
+        # Clear SQLite
+        try:
+            with self.conn:
+                self.conn.execute("DELETE FROM chunks")
+        except sqlite3.Error as e:
+            logger.error(f"Error clearing chunks from DB: {e}")
+
         self.keyword_index = KeywordIndex()
         self.embedding_model = SimpleEmbedding()
         self.stats = RAGStats()
@@ -1048,6 +1177,7 @@ class AIRAGStore:
             success: Whether the retrieval led to a successful outcome
             learning_rate: Learning rate for Q-value updates (0-1)
         """
+        updated_chunks = []
         for chunk_id in chunk_ids:
             if chunk_id in self.chunks:
                 chunk = self.chunks[chunk_id]
@@ -1063,6 +1193,21 @@ class AIRAGStore:
                 
                 # Clamp Q-value to [0, 1]
                 chunk.q_value = max(0.0, min(1.0, chunk.q_value))
+
+                updated_chunks.append(chunk)
+
+        # Update SQLite
+        if updated_chunks:
+            try:
+                with self.conn:
+                    for chunk in updated_chunks:
+                        self.conn.execute("""
+                            UPDATE chunks
+                            SET q_value = ?, retrieval_count = ?, success_count = ?
+                            WHERE chunk_id = ?
+                        """, (chunk.q_value, chunk.retrieval_count, chunk.success_count, chunk.chunk_id))
+            except sqlite3.Error as e:
+                logger.error(f"Error updating chunk stats in DB: {e}")
         
         self._save()
     
@@ -1095,6 +1240,17 @@ class AIRAGStore:
             chunk.q_value = initial_value
             chunk.retrieval_count = 0
             chunk.success_count = 0
+
+        # Update SQLite
+        try:
+            with self.conn:
+                self.conn.execute("""
+                    UPDATE chunks
+                    SET q_value = ?, retrieval_count = 0, success_count = 0
+                """, (initial_value,))
+        except sqlite3.Error as e:
+            logger.error(f"Error resetting q-values in DB: {e}")
+
         self._save()
     
     def get_memrl_stats(self) -> Dict[str, Any]:

@@ -228,9 +228,25 @@ class LocalStorageManager:
         self._session_type = SessionType.LOCAL
         self._remote_session: Optional[RemoteSessionRecord] = None
         
+        # Database connection
+        self._conn: Optional[sqlite3.Connection] = None
+
         # Initialize database
         self._init_database()
     
+    def close(self) -> None:
+        """Close the database connection."""
+        with self._lock:
+            if self._conn:
+                self._conn.close()
+                self._conn = None
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Get the persistent database connection."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(str(self._get_db_path()), check_same_thread=False)
+        return self._conn
+
     def _ensure_directories(self) -> None:
         """Ensure all storage directories exist."""
         directories = [
@@ -254,11 +270,12 @@ class LocalStorageManager:
     def _init_database(self) -> None:
         """Initialize the SQLite database for efficient queries."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.cursor()
-            
-            # Interactions table - stores all chat interactions
-            cursor.execute("""
+            conn = self._get_connection()
+            with conn:
+                cursor = conn.cursor()
+
+                # Interactions table - stores all chat interactions
+                cursor.execute("""
                 CREATE TABLE IF NOT EXISTS interactions (
                     interaction_id TEXT PRIMARY KEY,
                     timestamp TEXT NOT NULL,
@@ -360,8 +377,6 @@ class LocalStorageManager:
                 ON relationships(ai_id, participant_id)
             """)
             
-            conn.commit()
-            conn.close()
     
     # Session Management
     def start_session(
@@ -464,11 +479,12 @@ class LocalStorageManager:
     def _store_interaction_record(self, record: InteractionRecord) -> None:
         """Store an interaction record in the database."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO interactions (
+            conn = self._get_connection()
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT OR REPLACE INTO interactions (
                     interaction_id, timestamp, session_id, session_type,
                     sender_id, sender_name, sender_type, content, content_type,
                     ai_id, is_private, private_with, tool_calls,
@@ -492,9 +508,6 @@ class LocalStorageManager:
                 record.remote_room_code,
                 json.dumps(record.metadata)
             ))
-            
-            conn.commit()
-            conn.close()
             
             # Also update remote session statistics if applicable
             if self._remote_session:
@@ -529,7 +542,7 @@ class LocalStorageManager:
             List of InteractionRecords
         """
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             query = "SELECT * FROM interactions WHERE 1=1"
@@ -557,7 +570,6 @@ class LocalStorageManager:
             
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            conn.close()
             
             # Convert rows to records
             columns = [
@@ -587,7 +599,7 @@ class LocalStorageManager:
     ) -> List[InteractionRecord]:
         """Get chat history for a specific AI."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             if include_private:
@@ -609,7 +621,6 @@ class LocalStorageManager:
             
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "interaction_id", "timestamp", "session_id", "session_type",
@@ -638,7 +649,7 @@ class LocalStorageManager:
     ) -> List[InteractionRecord]:
         """Get private chat history between two participants."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -653,7 +664,6 @@ class LocalStorageManager:
             """, [participant_a, participant_b, participant_b, participant_a, limit])
             
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "interaction_id", "timestamp", "session_id", "session_type",
@@ -678,33 +688,31 @@ class LocalStorageManager:
     def _save_remote_session(self, session: RemoteSessionRecord) -> None:
         """Save a remote session record."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT OR REPLACE INTO remote_sessions (
-                    session_id, session_type, room_code, host_id, host_address,
-                    started_at, ended_at, participants, ai_personalities,
-                    messages_sent, messages_received, ai_requests, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                session.session_id,
-                session.session_type,
-                session.room_code,
-                session.host_id,
-                session.host_address,
-                session.started_at,
-                session.ended_at,
-                json.dumps(session.participants),
-                json.dumps(session.ai_personalities),
-                session.messages_sent,
-                session.messages_received,
-                session.ai_requests,
-                json.dumps(session.metadata)
-            ))
-            
-            conn.commit()
-            conn.close()
+            conn = self._get_connection()
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT OR REPLACE INTO remote_sessions (
+                        session_id, session_type, room_code, host_id, host_address,
+                        started_at, ended_at, participants, ai_personalities,
+                        messages_sent, messages_received, ai_requests, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    session.session_id,
+                    session.session_type,
+                    session.room_code,
+                    session.host_id,
+                    session.host_address,
+                    session.started_at,
+                    session.ended_at,
+                    json.dumps(session.participants),
+                    json.dumps(session.ai_personalities),
+                    session.messages_sent,
+                    session.messages_received,
+                    session.ai_requests,
+                    json.dumps(session.metadata)
+                ))
             
             # Also save to JSON for easy access
             session_file = self.storage_dir / "remote_sessions" / f"{session.session_id}.json"
@@ -718,7 +726,7 @@ class LocalStorageManager:
     ) -> List[RemoteSessionRecord]:
         """Get remote session history."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             if session_type:
@@ -736,7 +744,6 @@ class LocalStorageManager:
                 """, [limit])
             
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "session_id", "session_type", "room_code", "host_id", "host_address",
@@ -792,27 +799,25 @@ class LocalStorageManager:
         memory_id = str(uuid.uuid4())
         
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                INSERT INTO ai_memories (
-                    memory_id, ai_id, memory_type, content, source,
-                    timestamp, importance, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                memory_id,
-                ai_id,
-                memory_type,
-                content,
-                source,
-                datetime.now().isoformat(),
-                importance,
-                json.dumps(metadata or {})
-            ))
-            
-            conn.commit()
-            conn.close()
+            conn = self._get_connection()
+            with conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT INTO ai_memories (
+                        memory_id, ai_id, memory_type, content, source,
+                        timestamp, importance, metadata
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    memory_id,
+                    ai_id,
+                    memory_type,
+                    content,
+                    source,
+                    datetime.now().isoformat(),
+                    importance,
+                    json.dumps(metadata or {})
+                ))
         
         return memory_id
     
@@ -825,7 +830,7 @@ class LocalStorageManager:
     ) -> List[Dict[str, Any]]:
         """Get memories for an AI."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             query = "SELECT * FROM ai_memories WHERE ai_id = ?"
@@ -843,7 +848,6 @@ class LocalStorageManager:
             
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "memory_id", "ai_id", "memory_type", "content", "source",
@@ -867,7 +871,7 @@ class LocalStorageManager:
     ) -> List[Dict[str, Any]]:
         """Search AI memories by content."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # Simple LIKE search - could be enhanced with FTS5
@@ -879,7 +883,6 @@ class LocalStorageManager:
             """, [ai_id, f"%{query}%", limit])
             
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "memory_id", "ai_id", "memory_type", "content", "source",
@@ -907,76 +910,74 @@ class LocalStorageManager:
     ) -> None:
         """Update or create a relationship record."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
-            cursor = conn.cursor()
-            
-            # Check if relationship exists
-            cursor.execute("""
-                SELECT relationship_id, interaction_count, notes 
-                FROM relationships 
-                WHERE ai_id = ? AND participant_id = ?
-            """, [ai_id, participant_id])
-            
-            existing = cursor.fetchone()
-            now = datetime.now().isoformat()
-            
-            if existing:
-                relationship_id, count, existing_notes = existing
-                new_notes = existing_notes or "[]"
-                notes_list = safe_json_loads(new_notes, [])
-                if notes:
-                    notes_list.append({"note": notes, "timestamp": now})
-                    if len(notes_list) > 20:
-                        notes_list = notes_list[-20:]
+            conn = self._get_connection()
+            with conn:
+                cursor = conn.cursor()
                 
+                # Check if relationship exists
                 cursor.execute("""
-                    UPDATE relationships SET
-                        participant_name = ?,
-                        sentiment = ?,
-                        interaction_count = ?,
-                        last_interaction = ?,
-                        notes = ?,
-                        metadata = ?
-                    WHERE relationship_id = ?
-                """, (
-                    participant_name,
-                    sentiment,
-                    count + 1,
-                    now,
-                    json.dumps(notes_list),
-                    json.dumps(metadata or {}),
-                    relationship_id
-                ))
-            else:
-                relationship_id = str(uuid.uuid4())
-                notes_list = [{"note": notes, "timestamp": now}] if notes else []
+                    SELECT relationship_id, interaction_count, notes
+                    FROM relationships
+                    WHERE ai_id = ? AND participant_id = ?
+                """, [ai_id, participant_id])
                 
-                cursor.execute("""
-                    INSERT INTO relationships (
-                        relationship_id, ai_id, participant_id, participant_name,
-                        sentiment, interaction_count, first_met, last_interaction,
-                        notes, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    relationship_id,
-                    ai_id,
-                    participant_id,
-                    participant_name,
-                    sentiment,
-                    1,
-                    now,
-                    now,
-                    json.dumps(notes_list),
-                    json.dumps(metadata or {})
-                ))
-            
-            conn.commit()
-            conn.close()
+                existing = cursor.fetchone()
+                now = datetime.now().isoformat()
+
+                if existing:
+                    relationship_id, count, existing_notes = existing
+                    new_notes = existing_notes or "[]"
+                    notes_list = safe_json_loads(new_notes, [])
+                    if notes:
+                        notes_list.append({"note": notes, "timestamp": now})
+                        if len(notes_list) > 20:
+                            notes_list = notes_list[-20:]
+
+                    cursor.execute("""
+                        UPDATE relationships SET
+                            participant_name = ?,
+                            sentiment = ?,
+                            interaction_count = ?,
+                            last_interaction = ?,
+                            notes = ?,
+                            metadata = ?
+                        WHERE relationship_id = ?
+                    """, (
+                        participant_name,
+                        sentiment,
+                        count + 1,
+                        now,
+                        json.dumps(notes_list),
+                        json.dumps(metadata or {}),
+                        relationship_id
+                    ))
+                else:
+                    relationship_id = str(uuid.uuid4())
+                    notes_list = [{"note": notes, "timestamp": now}] if notes else []
+
+                    cursor.execute("""
+                        INSERT INTO relationships (
+                            relationship_id, ai_id, participant_id, participant_name,
+                            sentiment, interaction_count, first_met, last_interaction,
+                            notes, metadata
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        relationship_id,
+                        ai_id,
+                        participant_id,
+                        participant_name,
+                        sentiment,
+                        1,
+                        now,
+                        now,
+                        json.dumps(notes_list),
+                        json.dumps(metadata or {})
+                    ))
     
     def get_ai_relationships(self, ai_id: str) -> List[Dict[str, Any]]:
         """Get all relationships for an AI."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             cursor.execute("""
@@ -986,7 +987,6 @@ class LocalStorageManager:
             """, [ai_id])
             
             rows = cursor.fetchall()
-            conn.close()
             
             columns = [
                 "relationship_id", "ai_id", "participant_id", "participant_name",
@@ -1019,11 +1019,10 @@ class LocalStorageManager:
             }
             
             # Get all unique AI IDs
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT ai_id FROM ai_memories WHERE ai_id IS NOT NULL")
             ai_ids = [row[0] for row in cursor.fetchall()]
-            conn.close()
             
             for ai_id in ai_ids:
                 data["ai_data"][ai_id] = {
@@ -1048,7 +1047,7 @@ class LocalStorageManager:
     def get_storage_stats(self) -> Dict[str, Any]:
         """Get statistics about stored data."""
         with self._lock:
-            conn = sqlite3.connect(str(self._get_db_path()))
+            conn = self._get_connection()
             cursor = conn.cursor()
             
             # Count interactions
@@ -1076,8 +1075,6 @@ class LocalStorageManager:
             # Get database size
             db_path = self._get_db_path()
             db_size = db_path.stat().st_size if db_path.exists() else 0
-            
-            conn.close()
             
             return {
                 "total_interactions": total_interactions,

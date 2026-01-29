@@ -1018,16 +1018,68 @@ class LocalStorageManager:
                 "ai_data": {}
             }
             
-            # Get all unique AI IDs
+            # Optimization: Bulk fetch memories and relationships to avoid N+1 queries
             conn = self._get_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT ai_id FROM ai_memories WHERE ai_id IS NOT NULL")
-            ai_ids = [row[0] for row in cursor.fetchall()]
+
+            # 1. Bulk fetch memories
+            columns_mem = [
+                "memory_id", "ai_id", "memory_type", "content", "source",
+                "timestamp", "importance", "metadata", "created_at"
+            ]
+            cursor.execute(f"""
+                SELECT {', '.join(columns_mem)} FROM ai_memories
+                WHERE ai_id IS NOT NULL
+                ORDER BY ai_id, importance DESC, timestamp DESC
+            """)
+
+            memories_by_ai = {}
+
+            for row in cursor:
+                mem = dict(zip(columns_mem, row))
+                if mem["metadata"]:
+                    mem["metadata"] = safe_json_loads(mem["metadata"], {})
+
+                ai_id = mem["ai_id"]
+                if ai_id not in memories_by_ai:
+                    memories_by_ai[ai_id] = []
+
+                if len(memories_by_ai[ai_id]) < 1000:
+                    memories_by_ai[ai_id].append(mem)
+
+            # 2. Bulk fetch relationships
+            columns_rel = [
+                "relationship_id", "ai_id", "participant_id", "participant_name",
+                "sentiment", "interaction_count", "first_met", "last_interaction",
+                "notes", "metadata"
+            ]
+            cursor.execute(f"""
+                SELECT {', '.join(columns_rel)} FROM relationships
+                ORDER BY ai_id, interaction_count DESC
+            """)
+
+            relationships_by_ai = {}
+
+            for row in cursor:
+                rel = dict(zip(columns_rel, row))
+                if rel["notes"]:
+                    rel["notes"] = safe_json_loads(rel["notes"], [])
+                if rel["metadata"]:
+                    rel["metadata"] = safe_json_loads(rel["metadata"], {})
+
+                ai_id = rel["ai_id"]
+                if ai_id not in relationships_by_ai:
+                    relationships_by_ai[ai_id] = []
+                relationships_by_ai[ai_id].append(rel)
+
+            # 3. Construct ai_data
+            # Only include AIs that have memories (preserving original behavior)
+            target_ai_ids = list(memories_by_ai.keys())
             
-            for ai_id in ai_ids:
+            for ai_id in target_ai_ids:
                 data["ai_data"][ai_id] = {
-                    "memories": self.get_ai_memories(ai_id, limit=1000),
-                    "relationships": self.get_ai_relationships(ai_id)
+                    "memories": memories_by_ai[ai_id],
+                    "relationships": relationships_by_ai.get(ai_id, [])
                 }
             
             with open(export_path, 'w') as f:

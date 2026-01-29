@@ -133,7 +133,7 @@ fun ChatScreen(
                             }
                         },
                         onRetryClick = {
-                            // TODO: Implement retry logic
+                            viewModel.retryMessage(message)
                         }
                     )
                 }

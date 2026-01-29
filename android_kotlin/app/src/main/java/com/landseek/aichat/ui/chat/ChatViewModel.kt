@@ -265,6 +265,20 @@ class ChatViewModel @Inject constructor(
         }
     }
     
+    fun startPrivateChat(aiId: String) {
+        val personality = BUILTIN_PERSONALITIES.find { it.name.lowercase() == aiId }
+        if (personality != null) {
+            _activeAIs.value = listOf(
+                ActiveAI(
+                    id = aiId,
+                    name = personality.name,
+                    avatar = personality.avatar,
+                    isActive = true
+                )
+            )
+        }
+    }
+
     fun toggleAI(aiId: String) {
         _activeAIs.value = _activeAIs.value.map { ai ->
             if (ai.id == aiId) ai.copy(isActive = !ai.isActive)

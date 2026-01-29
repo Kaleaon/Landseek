@@ -138,7 +138,20 @@ fun AIChatApp() {
                 modifier = Modifier.padding(innerPadding)
             ) {
                 composable(Screen.Chat.route) { ChatScreen(viewModel) }
-                composable(Screen.Participants.route) { ParticipantsScreen(viewModel) }
+                composable(Screen.Participants.route) {
+                    ParticipantsScreen(
+                        viewModel = viewModel,
+                        onNavigateToChat = {
+                            navController.navigate(Screen.Chat.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    )
+                }
                 composable(Screen.Documents.route) { DocumentsScreen() }
                 composable(Screen.Tools.route) { ToolsScreen() }
                 composable(Screen.Settings.route) { SettingsScreen() }

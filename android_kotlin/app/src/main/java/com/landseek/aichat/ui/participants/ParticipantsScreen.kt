@@ -28,7 +28,8 @@ import com.landseek.aichat.ui.theme.*
 
 @Composable
 fun ParticipantsScreen(
-    viewModel: ChatViewModel
+    viewModel: ChatViewModel,
+    onNavigateToChat: () -> Unit
 ) {
     val personalities = BUILTIN_PERSONALITIES
     val activeAIs by viewModel.activeAIs.collectAsState()
@@ -86,7 +87,11 @@ fun ParticipantsScreen(
         PersonalityDetailSheet(
             personality = personality,
             onDismiss = { selectedPersonality = null },
-            onStartPrivateChat = { /* TODO */ },
+            onStartPrivateChat = {
+                viewModel.startPrivateChat(personality.name.lowercase())
+                selectedPersonality = null
+                onNavigateToChat()
+            },
             onRename = { /* TODO */ }
         )
     }

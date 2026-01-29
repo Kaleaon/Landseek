@@ -328,7 +328,8 @@ fun isFinal(response: String): Boolean {
 fun buildSystemPrompt(
     personality: String = "",
     tools: List<ToolDefinition> = emptyList(),
-    userName: String = "User"
+    userName: String = "User",
+    subconsciousContext: String = ""
 ): String {
     val toolsSection = if (tools.isNotEmpty()) {
         val toolDescriptions = tools.joinToString("\n") { tool ->
@@ -351,17 +352,26 @@ fun buildSystemPrompt(
         """.trimIndent()
     } else ""
     
+    val subconsciousSection = if (subconsciousContext.isNotBlank()) {
+        """
+
+        ## Memory & Context
+        $subconsciousContext
+        """.trimIndent()
+    } else ""
+
     return """
     You are an AI assistant in a chat room. $personality
-    
+    $subconsciousSection
+
     You can think step-by-step using <thinking></thinking> tags.
     When you have a final answer, wrap it in <answer></answer> tags.
-    
+
     If you need to execute code or calculations, use <code></code> tags.
     $toolsSection
-    
+
     Current user: $userName
-    
+
     Remember to be helpful, accurate, and respectful.
     """.trimIndent()
 }
@@ -373,9 +383,10 @@ fun buildRAGSystemPrompt(
     personality: String = "",
     context: String,
     tools: List<ToolDefinition> = emptyList(),
-    userName: String = "User"
+    userName: String = "User",
+    subconsciousContext: String = ""
 ): String {
-    val basePrompt = buildSystemPrompt(personality, tools, userName)
+    val basePrompt = buildSystemPrompt(personality, tools, userName, subconsciousContext)
     
     return """
     $basePrompt
@@ -510,7 +521,10 @@ class RLM(
     private val maxIterations: Int = 30,
     private val ragStore: AIRAGStore? = null,
     private val aiName: String = "AI",
-    private val llmProvider: LLMProvider? = null
+    private val llmProvider: LLMProvider? = null,
+    private val subconscious: AISubconscious? = null,
+    private val metaCognition: AIMetaCognition? = null,
+    private val adaptiveMemory: AdaptiveMemory? = null
 ) {
     private var currentDepth = 0
     private val repl = REPLExecutor()
@@ -548,16 +562,30 @@ class RLM(
         
         // Build messages
         val messages = mutableListOf<RLMMessage>()
-        
-        // System prompt with optional RAG context
+
+        // Get subconscious context if available
+        val subconsciousContext = subconscious?.buildContextForPrompt() ?: ""
+
+        // Get metacognition strategy context if available
+        val strategyContext = metaCognition?.getStrategyContext() ?: ""
+
+        // Combine contexts
+        val fullContext = listOf(subconsciousContext, strategyContext)
+            .filter { it.isNotBlank() }
+            .joinToString("\n\n")
+
+        // System prompt with optional RAG context, subconscious, and metacognition
         val systemPrompt = if (ragStore != null && context.isNotEmpty()) {
             // Get relevant context from RAG
             val ragResults = ragStore.retrieve(context, topK = 5)
             val ragContext = ragResults.joinToString("\n\n") { it.chunk.content }
-            buildRAGSystemPrompt(aiName, ragContext, tools)
+            buildRAGSystemPrompt(aiName, ragContext, tools, subconsciousContext = fullContext)
         } else {
-            buildSystemPrompt(aiName, tools)
+            buildSystemPrompt(aiName, tools, subconsciousContext = fullContext)
         }
+
+        // Record user message in subconscious
+        subconscious?.recordMessage("user", query.ifEmpty { context })
         
         messages.add(RLMMessage(role = MessageRole.SYSTEM.value, content = systemPrompt))
         
@@ -588,6 +616,8 @@ class RLM(
             
             // If final, return answer
             if (parsed.isFinal && parsed.answer != null) {
+                // Record assistant response in subconscious
+                subconscious?.recordMessage("assistant", parsed.answer)
                 return parsed.answer
             }
             
@@ -624,7 +654,10 @@ class RLM(
                     maxIterations = maxIterations - iterationCount,
                     ragStore = ragStore,
                     aiName = aiName,
-                    llmProvider = llmProvider
+                    llmProvider = llmProvider,
+                    subconscious = subconscious,
+                    metaCognition = metaCognition,
+                    adaptiveMemory = adaptiveMemory
                 )
                 nestedRlm.currentDepth = currentDepth + 1
             }
@@ -710,13 +743,130 @@ fun createRLM(
     model: String = "gemma3:4b",
     aiName: String = "AI",
     ragStore: AIRAGStore? = null,
-    ollamaUrl: String = "http://localhost:11434"
+    ollamaUrl: String = "http://localhost:11434",
+    subconscious: AISubconscious? = null,
+    metaCognition: AIMetaCognition? = null,
+    adaptiveMemory: AdaptiveMemory? = null
 ): RLM {
     return RLM(
         model = model,
         apiBase = ollamaUrl,
         ragStore = ragStore,
         aiName = aiName,
-        llmProvider = OllamaProvider(model, ollamaUrl)
+        llmProvider = OllamaProvider(model, ollamaUrl),
+        subconscious = subconscious,
+        metaCognition = metaCognition,
+        adaptiveMemory = adaptiveMemory
     )
+}
+
+/**
+ * Create a fully autonomous AI with all cognitive systems.
+ */
+fun createAutonomousAI(
+    aiId: String,
+    aiName: String,
+    model: String = "gemma3:4b",
+    storageDir: String,
+    ollamaUrl: String = "http://localhost:11434"
+): AutonomousAI {
+    val ragStore = AIRAGStore(aiId, storageDir)
+    val subconscious = AISubconscious(aiId, aiName, storageDir, ragStore)
+    val metaCognition = AIMetaCognition(aiId, aiName, storageDir)
+    val adaptiveMemory = AdaptiveMemory(aiId, aiName, storageDir)
+
+    val rlm = RLM(
+        model = model,
+        apiBase = ollamaUrl,
+        ragStore = ragStore,
+        aiName = aiName,
+        llmProvider = OllamaProvider(model, ollamaUrl),
+        subconscious = subconscious,
+        metaCognition = metaCognition,
+        adaptiveMemory = adaptiveMemory
+    )
+
+    return AutonomousAI(
+        id = aiId,
+        name = aiName,
+        rlm = rlm,
+        ragStore = ragStore,
+        subconscious = subconscious,
+        metaCognition = metaCognition,
+        adaptiveMemory = adaptiveMemory
+    )
+}
+
+/**
+ * Autonomous AI - A fully independent AI personality with all cognitive systems.
+ */
+data class AutonomousAI(
+    val id: String,
+    val name: String,
+    val rlm: RLM,
+    val ragStore: AIRAGStore,
+    val subconscious: AISubconscious,
+    val metaCognition: AIMetaCognition,
+    val adaptiveMemory: AdaptiveMemory
+) {
+    /**
+     * Process a message and learn from the interaction.
+     */
+    suspend fun chat(
+        query: String,
+        context: String = "",
+        tools: List<ToolDefinition> = emptyList()
+    ): String {
+        val response = rlm.acompletion(query, context, tools)
+
+        // Store in adaptive memory
+        adaptiveMemory.storeSimple(
+            content = "Q: $query\nA: $response",
+            source = "conversation",
+            sourceType = "conversation"
+        )
+
+        return response
+    }
+
+    /**
+     * Provide feedback on the last interaction.
+     */
+    fun provideFeedback(outcome: InteractionOutcome, userFeedback: String? = null) {
+        // Get the last recorded messages from subconscious
+        // This is a simplified version - full implementation would track query/response pairs
+        metaCognition.reflect(
+            userQuery = "last query",  // Would be tracked properly in production
+            aiResponse = "last response",
+            outcome = outcome,
+            userFeedback = userFeedback
+        )
+    }
+
+    /**
+     * Get AI's self-report.
+     */
+    fun getSelfReport(): String {
+        val sb = StringBuilder()
+        sb.appendLine("=== $name Self-Report ===")
+        sb.appendLine()
+        sb.appendLine(metaCognition.getSelfReport())
+        sb.appendLine()
+        sb.appendLine("--- Memory Analysis ---")
+        val analysis = adaptiveMemory.analyze()
+        sb.appendLine("Total memories: ${analysis.totalMemories}")
+        sb.appendLine("Schemas: ${analysis.schemaUsage.size}")
+        sb.appendLine("Recommendations:")
+        analysis.recommendations.forEach { sb.appendLine("  - $it") }
+        return sb.toString()
+    }
+
+    /**
+     * Shutdown and save state.
+     */
+    fun shutdown() {
+        subconscious.shutdown()
+        metaCognition.shutdown()
+        adaptiveMemory.shutdown()
+    }
 }

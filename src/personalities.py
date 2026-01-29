@@ -61,6 +61,7 @@ class PersonalityDefinition:
 
 
 # Built-in personalities (10 unique personalities)
+# Note: These agents are being migrated from CleverFerret (https://GitHub.com/Kaleaon/cleverferret)
 BUILTIN_PERSONALITIES: List[PersonalityDefinition] = [
     PersonalityDefinition(
         name="Nova",

@@ -496,6 +496,8 @@ You [report.txt]: /ask Echo Make this report more engaging
 
 The chat room supports up to **10 unique AI personalities**, each with distinct characteristics:
 
+Note: These AI agents are being migrated from [CleverFerret](https://GitHub.com/Kaleaon/cleverferret).
+
 | Name | Avatar | Style | Tags |
 |------|--------|-------|------|
 | **Nova** | 🌟 | Curious, analytical, asks probing questions | analytical, curious, scientific |
@@ -977,6 +979,7 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Links
 
 - **Repository**: https://github.com/Kaleaon/Landseek
+- **CleverFerret (Agent Source)**: https://GitHub.com/Kaleaon/cleverferret
 - **RLM Paper**: https://alexzhang13.github.io/blog/2025/rlm/
 - **LiteLLM Docs**: https://docs.litellm.ai/
 - **Gemini API**: https://ai.google.dev/

@@ -4,6 +4,8 @@
 
 package com.landseek.aichat.ui.documents
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,34 +20,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.landseek.aichat.data.model.DocumentEntity
 import com.landseek.aichat.ui.theme.*
 import kotlinx.coroutines.launch
 
-data class Document(
-    val id: Long,
-    val name: String,
-    val mimeType: String,
-    val sizeBytes: Long,
-    val uploadedAt: Long
-)
-
 @Composable
-fun DocumentsScreen() {
-    val documents = remember {
-        listOf(
-            Document(1, "report.txt", "text/plain", 15200, System.currentTimeMillis() - 3600000),
-            Document(2, "data.json", "application/json", 8500, System.currentTimeMillis() - 7200000),
-            Document(3, "notes.md", "text/markdown", 3200, System.currentTimeMillis() - 86400000)
-        )
-    }
-    var selectedDocument by remember { mutableStateOf<Document?>(null) }
+fun DocumentsScreen(
+    viewModel: DocumentsViewModel = hiltViewModel()
+) {
+    val documents by viewModel.documents.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    var selectedDocument by remember { mutableStateOf<DocumentEntity?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     
-    val handleAnalyze: (Document) -> Unit = { doc ->
-        scope.launch {
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let { viewModel.uploadDocument(it) }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.snackbarMessage.collect { message ->
             snackbarHostState.showSnackbar(
-                message = "Analyzing ${doc.name}...",
+                message = message,
                 duration = SnackbarDuration.Short
             )
         }
@@ -56,83 +55,94 @@ fun DocumentsScreen() {
         containerColor = AIBackground,
         modifier = Modifier.fillMaxSize()
     ) { paddingValues ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Header
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            Column(
+                modifier = Modifier.fillMaxSize()
             ) {
-                Column {
-                    Text(
-                        text = "Documents",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "${documents.size} files uploaded",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AITextSecondary
-                    )
-                }
-
-                FloatingActionButton(
-                    onClick = { /* TODO: Upload document */ },
-                    containerColor = AIPrimary
+                // Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Upload")
-                }
-            }
-
-            HorizontalDivider(color = AIDivider)
-
-            // Document list
-            if (documents.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Description,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = AITextSecondary
-                        )
-                        Spacer(Modifier.height(16.dp))
+                    Column {
                         Text(
-                            text = "No documents uploaded",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = AITextSecondary
+                            text = "Documents",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = Color.White
                         )
                         Text(
-                            text = "Tap + to add a document",
+                            text = "${documents.size} files uploaded",
                             style = MaterialTheme.typography.bodySmall,
                             color = AITextSecondary
                         )
                     }
-                }
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(documents) { document ->
-                        DocumentCard(
-                            document = document,
-                            onClick = { selectedDocument = document },
-                            onQuickAnalyze = { handleAnalyze(document) }
-                        )
+
+                    FloatingActionButton(
+                        onClick = { launcher.launch(arrayOf("*/*")) },
+                        containerColor = AIPrimary
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Upload")
                     }
                 }
+
+                HorizontalDivider(color = AIDivider)
+
+                // Document list
+                if (documents.isEmpty()) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = AITextSecondary
+                            )
+                            Spacer(Modifier.height(16.dp))
+                            Text(
+                                text = "No documents uploaded",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = AITextSecondary
+                            )
+                            Text(
+                                text = "Tap + to add a document",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AITextSecondary
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(documents) { document ->
+                            DocumentCard(
+                                document = document,
+                                onClick = { selectedDocument = document },
+                                onQuickAnalyze = { viewModel.analyzeDocument(document) }
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.align(Alignment.Center),
+                    color = AIPrimary
+                )
             }
         }
 
@@ -142,10 +152,13 @@ fun DocumentsScreen() {
                 document = document,
                 onDismiss = { selectedDocument = null },
                 onAnalyze = {
-                    handleAnalyze(document)
+                    viewModel.analyzeDocument(document)
                     selectedDocument = null
                 },
-                onDelete = { /* TODO */ }
+                onDelete = {
+                    viewModel.deleteDocument(document)
+                    selectedDocument = null
+                }
             )
         }
     }
@@ -154,7 +167,7 @@ fun DocumentsScreen() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocumentCard(
-    document: Document,
+    document: DocumentEntity,
     onClick: () -> Unit,
     onQuickAnalyze: () -> Unit,
     modifier: Modifier = Modifier
@@ -230,7 +243,7 @@ fun DocumentCard(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DocumentDetailSheet(
-    document: Document,
+    document: DocumentEntity,
     onDismiss: () -> Unit,
     onAnalyze: () -> Unit,
     onDelete: () -> Unit

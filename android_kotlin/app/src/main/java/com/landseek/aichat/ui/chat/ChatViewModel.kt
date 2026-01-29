@@ -148,72 +148,102 @@ class ChatViewModel @Inject constructor(
         val activeAIList = _activeAIs.value.filter { it.isActive }
         
         for (ai in activeAIList) {
-            // Phase 1: Thinking/RAG retrieval (GPT Mobile ThinkingBlock pattern)
-            _uiState.value = ChatUiState.Thinking(ai.id, "Retrieving context...")
-            _currentThought.value = "🔍 ${ai.name} is searching knowledge base..."
-            kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
-            
-            _currentThought.value = "📚 ${ai.name} is processing relevant context..."
-            kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
-            
-            _currentThought.value = "💭 ${ai.name} is formulating response..."
-            kotlinx.coroutines.delay(StreamingConfig.FORMULATING_DELAY_MS)
-            
-            // Phase 2: Generate response with streaming simulation
-            val fullResponse = generateAIResponse(ai, userText)
-            
-            // Add message with loading state (shows ● cursor)
-            val messageId = UUID.randomUUID().toString()
-            val loadingMessage = ChatMessage(
-                id = messageId,
-                sender = ai.name,
-                avatar = ai.avatar,
-                content = "",
-                isUser = false,
-                senderColor = AIColors.getColorForAI(ai.id),
-                isLoading = true,
-                thoughts = "Processing with RAG context...",
-                canRetry = true
-            )
-            _messages.value = _messages.value + loadingMessage
-            _uiState.value = ChatUiState.Streaming(ai.id, "")
-            
-            // Phase 3: Stream response character by character (GPT Mobile pattern)
-            var streamedContent = ""
-            for (char in fullResponse) {
-                streamedContent += char
-                _uiState.value = ChatUiState.Streaming(ai.id, streamedContent)
-                
-                // Update message with partial content
-                _messages.value = _messages.value.map { msg ->
-                    if (msg.id == messageId) {
-                        msg.copy(content = streamedContent, isLoading = true)
-                    } else msg
-                }
-                
-                // Variable delay for natural feel (using config constants)
-                val delay = when (char) {
-                    '.', '!', '?' -> StreamingConfig.SENTENCE_END_DELAY_MS
-                    ',', ';', ':' -> StreamingConfig.CLAUSE_DELAY_MS
-                    ' ' -> StreamingConfig.WORD_DELAY_MS
-                    else -> StreamingConfig.CHARACTER_DELAY_MS
-                }
-                kotlinx.coroutines.delay(delay)
-            }
-            
-            // Phase 4: Finalize message (remove loading state)
+            simulateSingleAIResponse(ai, userText)
+        }
+    }
+
+    private suspend fun simulateSingleAIResponse(ai: ActiveAI, userText: String) {
+        // Phase 1: Thinking/RAG retrieval (GPT Mobile ThinkingBlock pattern)
+        _uiState.value = ChatUiState.Thinking(ai.id, "Retrieving context...")
+        _currentThought.value = "🔍 ${ai.name} is searching knowledge base..."
+        kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
+
+        _currentThought.value = "📚 ${ai.name} is processing relevant context..."
+        kotlinx.coroutines.delay(StreamingConfig.THINKING_PHASE_DELAY_MS)
+
+        _currentThought.value = "💭 ${ai.name} is formulating response..."
+        kotlinx.coroutines.delay(StreamingConfig.FORMULATING_DELAY_MS)
+
+        // Phase 2: Generate response with streaming simulation
+        val fullResponse = generateAIResponse(ai, userText)
+
+        // Add message with loading state (shows ● cursor)
+        val messageId = UUID.randomUUID().toString()
+        val loadingMessage = ChatMessage(
+            id = messageId,
+            sender = ai.name,
+            avatar = ai.avatar,
+            content = "",
+            isUser = false,
+            senderColor = AIColors.getColorForAI(ai.id),
+            isLoading = true,
+            thoughts = "Processing with RAG context...",
+            canRetry = true
+        )
+        _messages.value = _messages.value + loadingMessage
+        _uiState.value = ChatUiState.Streaming(ai.id, "")
+
+        // Phase 3: Stream response character by character (GPT Mobile pattern)
+        var streamedContent = ""
+        for (char in fullResponse) {
+            streamedContent += char
+            _uiState.value = ChatUiState.Streaming(ai.id, streamedContent)
+
+            // Update message with partial content
             _messages.value = _messages.value.map { msg ->
                 if (msg.id == messageId) {
-                    msg.copy(
-                        content = fullResponse,
-                        isLoading = false,
-                        thoughts = "",
-                        canRetry = true
-                    )
+                    msg.copy(content = streamedContent, isLoading = true)
                 } else msg
             }
-            
-            kotlinx.coroutines.delay(StreamingConfig.MESSAGE_GAP_DELAY_MS)
+
+            // Variable delay for natural feel (using config constants)
+            val delay = when (char) {
+                '.', '!', '?' -> StreamingConfig.SENTENCE_END_DELAY_MS
+                ',', ';', ':' -> StreamingConfig.CLAUSE_DELAY_MS
+                ' ' -> StreamingConfig.WORD_DELAY_MS
+                else -> StreamingConfig.CHARACTER_DELAY_MS
+            }
+            kotlinx.coroutines.delay(delay)
+        }
+
+        // Phase 4: Finalize message (remove loading state)
+        _messages.value = _messages.value.map { msg ->
+            if (msg.id == messageId) {
+                msg.copy(
+                    content = fullResponse,
+                    isLoading = false,
+                    thoughts = "",
+                    canRetry = true
+                )
+            } else msg
+        }
+
+        kotlinx.coroutines.delay(StreamingConfig.MESSAGE_GAP_DELAY_MS)
+    }
+
+    fun retryMessage(message: ChatMessage) {
+        if (_isProcessing.value) return
+
+        val lastUserMessage = _messages.value.lastOrNull { it.isUser }
+        val userText = lastUserMessage?.content ?: return
+
+        // Find AI by name.
+        val ai = _activeAIs.value.find { it.name == message.sender }
+
+        if (ai != null) {
+            viewModelScope.launch {
+                _isProcessing.value = true
+                _uiState.value = ChatUiState.Loading
+
+                // Remove the message being retried
+                _messages.value = _messages.value.filter { it.id != message.id }
+
+                simulateSingleAIResponse(ai, userText)
+
+                _isProcessing.value = false
+                _uiState.value = ChatUiState.Idle
+                _currentThought.value = ""
+            }
         }
     }
     

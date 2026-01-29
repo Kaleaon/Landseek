@@ -13,6 +13,11 @@ package com.landseek.aichat.ui.chat
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +48,15 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 /**
+ * Attachment data class
+ */
+data class Attachment(
+    val uri: String,
+    val name: String,
+    val type: String
+)
+
+/**
  * Chat message data class for UI
  * Enhanced with streaming support and thinking status
  */
@@ -57,7 +71,8 @@ data class ChatMessage(
     val senderColor: Color = Color.White,
     val isLoading: Boolean = false,  // Show loading cursor
     val thoughts: String = "",        // Thinking/RAG status
-    val canRetry: Boolean = false     // Allow retry action
+    val canRetry: Boolean = false,    // Allow retry action
+    val attachment: Attachment? = null
 )
 
 /**
@@ -80,10 +95,20 @@ fun ChatScreen(
     val isProcessing by viewModel.isProcessing.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     val currentThought by viewModel.currentThought.collectAsState()
+    val currentAttachment by viewModel.currentAttachment.collectAsState()
     
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    val launcher = rememberLauncherForActivityResult(contract = ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) {
+            context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val name = getFileName(context, uri)
+            val type = context.contentResolver.getType(uri) ?: "*/*"
+            viewModel.onAttachmentSelected(Attachment(uri.toString(), name, type))
+        }
+    }
     
     // Snackbar for actions
     val snackbarHostState = remember { SnackbarHostState() }
@@ -153,6 +178,9 @@ fun ChatScreen(
                 onTextChange = viewModel::onInputTextChange,
                 onSend = viewModel::sendMessage,
                 isProcessing = isProcessing,
+                currentAttachment = currentAttachment,
+                onAttachmentClick = { launcher.launch(arrayOf("*/*")) },
+                onClearAttachment = { viewModel.clearAttachment() },
                 modifier = Modifier.fillMaxWidth()
             )
         }
@@ -268,6 +296,35 @@ fun ChatBubble(
                     .widthIn(max = 300.dp)
                     .padding(bottom = 4.dp)
             )
+        }
+
+        // Show attachment if present
+        if (message.attachment != null) {
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .padding(bottom = 4.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = if (message.isUser) UserMessageBubble.copy(alpha = 0.8f) else AIMessageBubble.copy(alpha = 0.8f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AttachFile,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = message.attachment.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White
+                    )
+                }
+            }
         }
         
         Surface(
@@ -413,6 +470,9 @@ fun ChatInput(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     isProcessing: Boolean,
+    currentAttachment: Attachment? = null,
+    onAttachmentClick: () -> Unit = {},
+    onClearAttachment: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -420,56 +480,93 @@ fun ChatInput(
         color = AISurface,
         tonalElevation = 2.dp
     ) {
-        Row(
-            modifier = Modifier
-                .padding(8.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Attachment button
-            IconButton(
-                onClick = { /* TODO: Attach file */ }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AttachFile,
-                    contentDescription = "Attach",
-                    tint = AITextSecondary
-                )
-            }
-            
-            // Text field
-            OutlinedTextField(
-                value = text,
-                onValueChange = onTextChange,
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type a message...", color = AITextSecondary) },
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AIPrimary,
-                    unfocusedBorderColor = AIDivider,
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White
-                ),
-                singleLine = false,
-                maxLines = 4
-            )
-            
-            // Send button
-            IconButton(
-                onClick = onSend,
-                enabled = text.isNotBlank() && !isProcessing
-            ) {
-                if (isProcessing) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = AIPrimary
-                    )
-                } else {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            if (currentAttachment != null) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .background(AIPrimary.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Icon(
-                        imageVector = Icons.Default.Send,
-                        contentDescription = "Send",
-                        tint = if (text.isNotBlank()) AIPrimary else AITextSecondary
+                        imageVector = Icons.Default.AttachFile,
+                        contentDescription = null,
+                        tint = AIPrimary,
+                        modifier = Modifier.size(16.dp)
                     )
+                    Text(
+                        text = currentAttachment.name,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = onClearAttachment,
+                        modifier = Modifier.size(20.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove attachment",
+                            tint = AITextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier
+                    .padding(8.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                // Attachment button
+                IconButton(
+                    onClick = onAttachmentClick
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AttachFile,
+                        contentDescription = "Attach",
+                        tint = if (currentAttachment != null) AIPrimary else AITextSecondary
+                    )
+                }
+
+                // Text field
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Type a message...", color = AITextSecondary) },
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = AIPrimary,
+                        unfocusedBorderColor = AIDivider,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    singleLine = false,
+                    maxLines = 4
+                )
+
+                // Send button
+                IconButton(
+                    onClick = onSend,
+                    enabled = (text.isNotBlank() || currentAttachment != null) && !isProcessing
+                ) {
+                    if (isProcessing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            color = AIPrimary
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Send,
+                            contentDescription = "Send",
+                            tint = if (text.isNotBlank() || currentAttachment != null) AIPrimary else AITextSecondary
+                        )
+                    }
                 }
             }
         }
@@ -479,4 +576,29 @@ fun ChatInput(
 private fun formatTimestamp(timestamp: Long): String {
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
     return sdf.format(Date(timestamp))
+}
+
+private fun getFileName(context: Context, uri: Uri): String {
+    var result: String? = null
+    if (uri.scheme == "content") {
+        val cursor = context.contentResolver.query(uri, null, null, null, null)
+        try {
+            if (cursor != null && cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index != -1) {
+                    result = cursor.getString(index)
+                }
+            }
+        } finally {
+            cursor?.close()
+        }
+    }
+    if (result == null) {
+        result = uri.path
+        val cut = result?.lastIndexOf('/')
+        if (cut != null && cut != -1) {
+            result = result?.substring(cut + 1)
+        }
+    }
+    return result ?: "Unknown file"
 }

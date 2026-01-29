@@ -23,11 +23,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
 import com.landseek.aichat.domain.model.PersonalityDefinition
+import com.landseek.aichat.ui.chat.ChatViewModel
 import com.landseek.aichat.ui.theme.*
 
 @Composable
-fun ParticipantsScreen() {
+fun ParticipantsScreen(
+    viewModel: ChatViewModel
+) {
     val personalities = BUILTIN_PERSONALITIES
+    val activeAIs by viewModel.activeAIs.collectAsState()
     var selectedPersonality by remember { mutableStateOf<PersonalityDefinition?>(null) }
     
     Column(
@@ -57,10 +61,20 @@ fun ParticipantsScreen() {
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(personalities) { personality ->
+                val activeAI = activeAIs.find { it.id == personality.name.lowercase() }
+                val isActive = activeAI?.isActive == true
+
                 PersonalityCard(
                     personality = personality,
-                    isActive = true, // TODO: Get from state
-                    onToggle = { /* TODO */ },
+                    isActive = isActive,
+                    onToggle = { active ->
+                        if (active) {
+                            if (activeAI == null) viewModel.addAI(personality.name.lowercase())
+                            else if (!isActive) viewModel.toggleAI(personality.name.lowercase())
+                        } else {
+                            if (isActive) viewModel.toggleAI(personality.name.lowercase())
+                        }
+                    },
                     onClick = { selectedPersonality = personality }
                 )
             }

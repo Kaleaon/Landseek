@@ -24,14 +24,10 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
-import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlinx.serialization.Serializable
 import java.io.*
 import java.net.URL
 import java.time.Instant
-import org.apache.poi.xwpf.usermodel.XWPFDocument
 
 /**
  * Supported file extensions and their MIME types.
@@ -153,15 +149,6 @@ sealed class DocumentReadResult {
  * Document Reader for multi-format document processing.
  */
 class DocumentReader(private val context: Context? = null) {
-
-    private var isPdfBoxInitialized = false
-
-    init {
-        if (context != null) {
-            PDFBoxResourceLoader.init(context)
-            isPdfBoxInitialized = true
-        }
-    }
     
     companion object {
         // Maximum image dimension for Gemma 3 (normalized to 896x896)
@@ -487,34 +474,41 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readPdfFile(file: File): DocumentReadResult {
-        if (!isPdfBoxInitialized) {
-            return DocumentReadResult.Error("PDF processing requires Context to be initialized.")
-        }
-
         return try {
-            var text: String
-            var pages: Int
+            // Use pdfbox-android for PDF text extraction
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(file)
+            val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+            val text = stripper.getText(document)
+            val pageCount = document.numberOfPages
 
-            PDDocument.load(file).use { document ->
-                val stripper = PDFTextStripper()
-                text = stripper.getText(document)
-                pages = document.numberOfPages
-            }
+            // Extract metadata
+            val info = document.documentInformation
+            val title = info?.title ?: file.nameWithoutExtension
+            val author = info?.author
 
-            val metadata = mapOf(
+            val metadata = mutableMapOf(
                 "path" to file.absolutePath,
                 "size" to file.length().toString(),
-                "pages" to pages.toString()
+                "pages" to pageCount.toString()
             )
-            
+            info?.creationDate?.let { metadata["created"] = it.time.toString() }
+            info?.modificationDate?.let { metadata["modified"] = it.time.toString() }
+
+            document.close()
+
+            if (text.length > MAX_TEXT_SIZE) {
+                return DocumentReadResult.Error("PDF too large (max ${MAX_TEXT_SIZE} characters). Consider splitting the document.")
+            }
+
             DocumentReadResult.Success(
                 DocumentContent(
-                    text = text.trim(),
-                    title = file.nameWithoutExtension,
+                    text = text,
+                    title = title,
+                    author = author,
                     sourceType = "file",
                     originalFormat = "pdf",
-                    metadata = metadata,
-                    pages = pages
+                    pages = pageCount,
+                    metadata = metadata
                 )
             )
         } catch (e: Exception) {
@@ -523,39 +517,24 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readDocxFile(file: File): DocumentReadResult {
+        // TODO: Implement DOCX text extraction using Apache POI or similar
+        // Add dependency: implementation("org.apache.poi:poi-ooxml:5.2.5")
+        // Usage: XWPFDocument(FileInputStream(file)) -> iterate paragraphs
         return try {
-            FileInputStream(file).use { fis ->
-                XWPFDocument(fis).use { document ->
-                    val textBuilder = StringBuilder()
-
-                    // Iterate paragraphs
-                    for (paragraph in document.paragraphs) {
-                        textBuilder.append(paragraph.text).append("\n")
-                    }
-
-                    val text = textBuilder.toString().trim()
-
-                    if (text.length > MAX_TEXT_SIZE) {
-                        return DocumentReadResult.Error("Document too large (max $MAX_TEXT_SIZE characters)")
-                    }
-
-                    val metadata = mapOf(
-                        "path" to file.absolutePath,
-                        "size" to file.length().toString(),
-                        "lastModified" to Instant.ofEpochMilli(file.lastModified()).toString()
-                    )
-
-                    DocumentReadResult.Success(
-                        DocumentContent(
-                            text = text,
-                            title = file.nameWithoutExtension,
-                            sourceType = "file",
-                            originalFormat = "docx",
-                            metadata = metadata
-                        )
-                    )
-                }
-            }
+            val metadata = mapOf(
+                "path" to file.absolutePath,
+                "size" to file.length().toString()
+            )
+            
+            DocumentReadResult.Success(
+                DocumentContent(
+                    text = "[Word Document: ${file.name}]\n\n⚠️ DOCX text extraction requires Apache POI library. Add 'org.apache.poi:poi-ooxml:5.2.5' to dependencies.",
+                    title = file.nameWithoutExtension,
+                    sourceType = "file",
+                    originalFormat = "docx",
+                    metadata = metadata
+                )
+            )
         } catch (e: Exception) {
             DocumentReadResult.Error("Error reading DOCX: ${e.message}")
         }

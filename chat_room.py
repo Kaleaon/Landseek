@@ -29,8 +29,9 @@ Based on: https://github.com/ysz/recursive-llm
 import asyncio
 import os
 import sys
+import random
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
@@ -300,6 +301,10 @@ class AIChatRoom:
         self.addon_manager = get_addon_manager() if enable_addons else None
         self.personality_manager = get_personality_manager()
         
+        # Free Will / Autonomy
+        self.free_will_enabled = False
+        self.free_will_task: Optional[asyncio.Task] = None
+
         # State management
         self.state_manager: Optional[AIStateManager] = None
         if enable_state:
@@ -663,6 +668,118 @@ Respond privately to {from_participant}. Be personal and direct."""
         msg = ChatMessage(sender="System", content=content)
         self.messages.append(msg)
     
+    def start_free_will_loop(self) -> None:
+        """Start the autonomous free will loop."""
+        if self.free_will_enabled and self.free_will_task:
+            return  # Already running
+
+        self.free_will_enabled = True
+        self.free_will_task = asyncio.create_task(self._free_will_loop())
+        self._add_system_message("🤖 AI Free Will enabled. Agents may now act autonomously.")
+
+    def stop_free_will_loop(self) -> None:
+        """Stop the autonomous free will loop."""
+        self.free_will_enabled = False
+        if self.free_will_task:
+            self.free_will_task.cancel()
+            self.free_will_task = None
+        self._add_system_message("🤖 AI Free Will disabled.")
+
+    async def _free_will_loop(self) -> None:
+        """Background loop for AI autonomy."""
+        while self.free_will_enabled:
+            # Random wait between checks (e.g., 10-30 seconds)
+            wait_time = random.uniform(10, 30)
+            try:
+                await asyncio.sleep(wait_time)
+
+                # Check if we have participants
+                if not self.participants:
+                    continue
+
+                # Pick a random participant
+                ai_ids = list(self.participants.keys())
+                ai_id = random.choice(ai_ids)
+
+                # 30% chance to actually try to speak to avoid too much noise
+                if random.random() < 0.3:
+                    await self.check_ai_free_will(ai_id)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Error in free will loop: {e}")
+                await asyncio.sleep(5)  # Wait a bit on error
+
+    async def check_ai_free_will(self, ai_id: str) -> None:
+        """
+        Ask an AI if they want to initiate an action autonomously.
+
+        Args:
+            ai_id: ID of the AI to check
+        """
+        if ai_id not in self.participants:
+            return
+
+        ai = self.participants[ai_id]
+        context = self._get_conversation_context()
+        doc = self.get_active_document()
+
+        doc_info = ""
+        if doc:
+            doc_info = f"\nActive Document: {doc.name}\n"
+
+        query = f"""You are {ai.display_name}. Personality: {ai.personality}
+{doc_info}
+The conversation is ongoing or paused. You have "Free Will" enabled, meaning you can speak without being spoken to.
+
+Recent conversation:
+{context}
+
+Do you have something meaningful to contribute, a question to ask, or a new topic to raise based on your personality?
+- If you want to stay silent (which is fine), reply with exactly: PASS
+- If you want to speak, write your message directly. You can use tools like @search_text if needed.
+- Do not be repetitive. Only speak if you have something new or interesting to add.
+
+Action:"""
+
+        try:
+            # Use acompletion since we are in async context
+            response = await ai.rlm.acompletion(
+                query=query,
+                context="Free Will Check"
+            )
+
+            response = response.strip()
+
+            # Check for PASS
+            if response == "PASS" or response == "'PASS'" or response == '"PASS"':
+                return
+
+            # If response is too short or looks like a refusal, ignore
+            if len(response) < 2:
+                return
+
+            # Otherwise, it's a message!
+            # Execute tools if present
+            if self.enable_tools:
+                tool_call = parse_tool_call(response)
+                if tool_call:
+                    result = self.execute_tool(tool_call["tool"], **tool_call["arguments"])
+                    response = f"{response}\n\n🔧 Tool Result: {result}"
+
+            await self.send_message(ai.display_name, response)
+            print(f"\n[Autonomous] {ai.display_name}: {response}\n")
+
+            # Update state
+            if ai.state and self.state_manager:
+                ai.state.last_active = datetime.now().isoformat()
+                self.state_manager.save_state(ai.state)
+
+        except Exception:
+            # Silently fail on autonomy errors to not disrupt user
+            pass
+
     def upload_document(self, file_path: str, index_for_ais: bool = True) -> Optional[Document]:
         """
         Upload a document to the chat room for AI processing.
@@ -1223,6 +1340,7 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
     print("  /share             - Get share code (if hosting)")
     print("  /peers             - List connected peers")
     print("  /disconnect        - Leave or stop hosting")
+    print("  /freewill [on/off] - Toggle AI autonomous free will")
     print("  Type anything else to send a message")
     print(f"{'='*60}\n")
     
@@ -1237,12 +1355,16 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
                 p2p_indicator = "[🌐 Connected] "
             
             prompt = f"{p2p_indicator}You [{doc.name}]: " if doc else f"{p2p_indicator}You: "
-            user_input = input(prompt).strip()
+
+            # Use run_in_executor to avoid blocking the event loop (needed for free will loop)
+            user_input = await asyncio.get_event_loop().run_in_executor(None, input, prompt)
+            user_input = user_input.strip()
             
             if not user_input:
                 continue
                 
             if user_input.lower() == "/quit":
+                chat_room.stop_free_will_loop()
                 if chat_room.is_host():
                     chat_room.stop_hosting()
                 elif chat_room.is_client():
@@ -1325,6 +1447,17 @@ async def interactive_chat(chat_room: AIChatRoom) -> None:
                     chat_room.leave_room()
                 else:
                     print("Not connected to any room.")
+                continue
+
+            if user_input.lower().startswith("/freewill"):
+                parts = user_input.split()
+                if len(parts) > 1 and parts[1].lower() == "on":
+                    chat_room.start_free_will_loop()
+                elif len(parts) > 1 and parts[1].lower() == "off":
+                    chat_room.stop_free_will_loop()
+                else:
+                    status = "enabled" if chat_room.free_will_enabled else "disabled"
+                    print(f"AI Free Will is currently {status}. Use /freewill on/off to toggle.")
                 continue
             
             if user_input.lower() == "/addons":

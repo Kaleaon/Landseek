@@ -13,6 +13,12 @@ from .prompts import build_system_prompt, build_rag_system_prompt
 from .parser import parse_response, is_final
 
 
+# Global shared executor for recursive calls
+# Using a large max_workers to support concurrent recursive requests without deadlock.
+# Each recursive step consumes one thread while waiting for result.
+_SHARED_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64)
+
+
 class RLMError(Exception):
     """Base error for RLM."""
     pass
@@ -353,13 +359,12 @@ class RLM:
             try:
                 loop = asyncio.get_running_loop()
                 # We're in async context, but REPL is sync
-                # Create a new thread to run async code
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(
-                        asyncio.run,
-                        recursive_llm(sub_query, sub_context)
-                    )
-                    return future.result()
+                # Use shared executor to run async code in a separate thread
+                future = _SHARED_EXECUTOR.submit(
+                    asyncio.run,
+                    recursive_llm(sub_query, sub_context)
+                )
+                return future.result()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run
                 return asyncio.run(recursive_llm(sub_query, sub_context))

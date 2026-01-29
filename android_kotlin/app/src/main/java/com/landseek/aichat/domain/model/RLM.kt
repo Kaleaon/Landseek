@@ -16,6 +16,12 @@ package com.landseek.aichat.domain.model
 import kotlinx.coroutines.*
 import kotlinx.serialization.Serializable
 import java.time.Instant
+import retrofit2.Call
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+import com.google.gson.annotations.SerializedName
 
 // ========== Types (from types.py) ==========
 
@@ -414,18 +420,84 @@ interface LLMProvider {
 }
 
 /**
+ * Ollama API DTOs and Interface
+ */
+data class OllamaChatRequest(
+    val model: String,
+    val messages: List<OllamaMessage>,
+    val stream: Boolean = false,
+    val options: OllamaOptions? = null
+)
+
+data class OllamaMessage(
+    val role: String,
+    val content: String,
+    val images: List<String>? = null
+)
+
+data class OllamaOptions(
+    val temperature: Float
+)
+
+data class OllamaChatResponse(
+    val model: String,
+    @SerializedName("created_at") val createdAt: String,
+    val message: OllamaMessage,
+    val done: Boolean,
+    @SerializedName("total_duration") val totalDuration: Long? = null
+)
+
+interface OllamaApi {
+    @POST("api/chat")
+    fun chat(@Body request: OllamaChatRequest): Call<OllamaChatResponse>
+}
+
+/**
  * Ollama LLM Provider.
  */
 class OllamaProvider(
     private val model: String,
-    private val baseUrl: String = "http://localhost:11434"
+    private val baseUrl: String = "http://localhost:11434",
+    api: OllamaApi? = null
 ) : LLMProvider {
+
+    @Volatile
+    private var _api: OllamaApi? = api
+
     override suspend fun complete(messages: List<RLMMessage>, temperature: Float): String {
         return withContext(Dispatchers.IO) {
-            // TODO: Implement actual Ollama API calls using Retrofit/OkHttp
-            // POST to $baseUrl/api/chat with JSON body containing model, messages, etc.
-            // For now, returns placeholder - replace with real HTTP client implementation
-            throw NotImplementedError("Ollama API integration requires HTTP client setup. See: https://github.com/ollama/ollama/blob/main/docs/api.md")
+            val currentApi = _api ?: synchronized(this@OllamaProvider) {
+                _api ?: Retrofit.Builder()
+                    .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build()
+                    .create(OllamaApi::class.java).also { _api = it }
+            }
+
+            val ollamaMessages = messages.map { rlmMsg ->
+                OllamaMessage(
+                    role = rlmMsg.role,
+                    content = rlmMsg.content
+                )
+            }
+
+            val request = OllamaChatRequest(
+                model = model,
+                messages = ollamaMessages,
+                stream = false,
+                options = OllamaOptions(temperature = temperature)
+            )
+
+            try {
+                val response = currentApi.chat(request).execute()
+                if (response.isSuccessful) {
+                    response.body()?.message?.content ?: throw RLMError("Empty response from Ollama")
+                } else {
+                    throw RLMError("Ollama API error: ${response.code()} ${response.errorBody()?.string()}")
+                }
+            } catch (e: Exception) {
+                throw RLMError("Failed to connect to Ollama: ${e.message}")
+            }
         }
     }
 }

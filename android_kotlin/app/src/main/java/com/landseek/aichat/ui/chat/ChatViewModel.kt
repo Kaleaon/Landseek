@@ -14,7 +14,7 @@ import androidx.lifecycle.viewModelScope
 import com.landseek.aichat.data.model.AIStateEntity
 import com.landseek.aichat.data.repository.MessageRepository
 import com.landseek.aichat.data.repository.AIStateRepository
-import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
+import com.landseek.aichat.domain.model.PersonalityDefinition
 import com.landseek.aichat.ui.theme.AIColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -45,8 +45,16 @@ class ChatViewModel @Inject constructor(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
     
-    private val _activeAIs = MutableStateFlow<List<ActiveAI>>(emptyList())
-    val activeAIs: StateFlow<List<ActiveAI>> = _activeAIs.asStateFlow()
+    val activeAIs: StateFlow<List<ActiveAI>> = aiStateRepository.getAllPersonalities()
+        .map { personalities ->
+            personalities
+                .filter { it.isActive }
+                .map { toActiveAI(it) }
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val personalities: StateFlow<List<PersonalityDefinition>> = aiStateRepository.getAllPersonalities()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText.asStateFlow()
@@ -69,7 +77,7 @@ class ChatViewModel @Inject constructor(
         initializeAIs()
         loadWelcomeMessages()
     }
-    
+
     private fun initializeAIs() {
         viewModelScope.launch {
             // Seed database if empty
@@ -188,7 +196,7 @@ class ChatViewModel @Inject constructor(
     }
     
     private suspend fun simulateAIResponses(userText: String) {
-        val activeAIList = _activeAIs.value.filter { it.isActive }
+        val activeAIList = activeAIs.value.filter { it.isActive }
         
         for (ai in activeAIList) {
             simulateSingleAIResponse(ai, userText)
@@ -271,7 +279,7 @@ class ChatViewModel @Inject constructor(
         val userText = lastUserMessage?.content ?: return
 
         // Find AI by name.
-        val ai = _activeAIs.value.find { it.name == message.sender }
+        val ai = activeAIs.value.find { it.name == message.sender }
 
         if (ai != null) {
             viewModelScope.launch {
@@ -357,6 +365,12 @@ class ChatViewModel @Inject constructor(
     fun removeAI(aiId: String) {
         viewModelScope.launch {
             aiStateRepository.setActive(aiId, false)
+        }
+    }
+
+    fun renameAI(aiId: String, newName: String) {
+        viewModelScope.launch {
+            aiStateRepository.updateDisplayName(aiId, newName)
         }
     }
 }

@@ -4,8 +4,13 @@
 
 package com.landseek.aichat.data.repository
 
+import com.google.gson.Gson
 import com.landseek.aichat.data.model.*
+import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
+import com.landseek.aichat.domain.model.PersonalityDefinition
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -52,7 +57,8 @@ class MessageRepository @Inject constructor(
  */
 @Singleton
 class AIStateRepository @Inject constructor(
-    private val aiStateDao: AIStateDao
+    private val aiStateDao: AIStateDao,
+    private val gson: Gson
 ) {
     suspend fun insert(state: AIStateEntity) = 
         aiStateDao.insert(state)
@@ -86,6 +92,56 @@ class AIStateRepository @Inject constructor(
     
     suspend fun updateEmotion(aiId: String, emotion: String, intensity: Float) = 
         aiStateDao.updateEmotion(aiId, emotion, intensity)
+
+    suspend fun syncDefaultPersonalities() {
+        val states = aiStateDao.getAllStates().first()
+        if (states.isEmpty()) {
+            val entities = BUILTIN_PERSONALITIES.map { toAIStateEntity(it) }
+            // Default first 3 to active
+            val initialEntities = entities.mapIndexed { index, entity ->
+                if (index < 3) entity.copy(isActive = true) else entity.copy(isActive = false)
+            }
+            aiStateDao.insertAll(initialEntities)
+        }
+    }
+
+    fun getAllPersonalities(): Flow<List<PersonalityDefinition>> {
+        return aiStateDao.getAllStates().map { entities ->
+            entities.map { toPersonalityDefinition(it) }
+        }
+    }
+
+    private fun toAIStateEntity(def: PersonalityDefinition): AIStateEntity {
+        return AIStateEntity(
+            aiId = def.id,
+            displayName = def.name,
+            originalName = def.name,
+            personality = def.personality,
+            avatar = def.avatar,
+            tags = gson.toJson(def.tags),
+            temperature = def.temperature,
+            maxTokens = def.maxTokens,
+            isActive = def.isActive
+        )
+    }
+
+    private fun toPersonalityDefinition(entity: AIStateEntity): PersonalityDefinition {
+        return PersonalityDefinition(
+            name = entity.displayName,
+            personality = entity.personality,
+            avatar = entity.avatar,
+            tags = try {
+                gson.fromJson(entity.tags, Array<String>::class.java).toList()
+            } catch (e: Exception) {
+                emptyList()
+            },
+            model = entity.model,
+            temperature = entity.temperature,
+            maxTokens = entity.maxTokens,
+            id = entity.aiId,
+            isActive = entity.isActive
+        )
+    }
 }
 
 /**

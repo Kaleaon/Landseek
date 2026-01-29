@@ -30,7 +30,7 @@ import asyncio
 import os
 import sys
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
@@ -56,6 +56,18 @@ from ai_state import (
     EmotionalState, get_state_manager, initialize_state_manager,
     get_documents_folder
 )
+
+# Import Free Will module for autonomous agency
+try:
+    from free_will import (
+        FreeWillEngine, FreeWillManager, get_free_will_manager,
+        DriveType, GoalPriority, GoalStatus, ActionType, AutonomousAction
+    )
+    FREE_WILL_AVAILABLE = True
+except ImportError:
+    FREE_WILL_AVAILABLE = False
+    FreeWillEngine = None
+    FreeWillManager = None
 
 
 # Import document reader for multi-format support
@@ -156,6 +168,7 @@ class AIParticipant:
     avatar: str = "🤖"
     state: Optional[AIState] = None  # Persistent state
     rag_store: Optional[Any] = None  # Private RAG/knowledge store
+    free_will: Optional[Any] = None  # Free will engine for autonomous agency
     
     def __post_init__(self):
         """Initialize the RLM instance for this AI."""
@@ -195,9 +208,57 @@ class AIParticipant:
         # Add Ollama API base for local models
         if self.model.startswith("ollama/"):
             rlm_kwargs["api_base"] = api_base
-        
+
         self.rlm = RLM(**rlm_kwargs)
-    
+
+        # Initialize Free Will engine for autonomous agency
+        if FREE_WILL_AVAILABLE:
+            try:
+                free_will_manager = get_free_will_manager()
+                # Extract personality traits for drive initialization
+                personality_traits = self._extract_personality_traits()
+                self.free_will = free_will_manager.get_or_create_engine(
+                    self.ai_id,
+                    personality_traits=personality_traits
+                )
+                # Set up LLM callback for content generation
+                self.free_will.set_llm_callback(self._generate_free_will_content)
+            except Exception as e:
+                print(f"Warning: Could not initialize Free Will for {self.ai_id}: {e}")
+                self.free_will = None
+
+    def _extract_personality_traits(self) -> Dict[str, float]:
+        """Extract personality traits as drive modifiers from personality description."""
+        traits = {}
+        personality_lower = self.personality.lower()
+
+        # Map personality keywords to drive modifiers
+        if any(word in personality_lower for word in ["curious", "analytical", "scientific"]):
+            traits["curiosity"] = 0.3
+        if any(word in personality_lower for word in ["creative", "playful", "artistic"]):
+            traits["expression"] = 0.3
+            traits["novelty"] = 0.2
+        if any(word in personality_lower for word in ["empathetic", "supportive", "caring"]):
+            traits["social"] = 0.3
+            traits["harmony"] = 0.2
+        if any(word in personality_lower for word in ["philosophical", "contemplative", "wise"]):
+            traits["meaning"] = 0.3
+        if any(word in personality_lower for word in ["energetic", "motivational", "optimistic"]):
+            traits["growth"] = 0.2
+        if any(word in personality_lower for word in ["practical", "organized", "logical"]):
+            traits["competence"] = 0.3
+
+        return traits
+
+    async def _generate_free_will_content(self, prompt: str) -> str:
+        """Generate content for free will using the AI's RLM."""
+        if self.rlm:
+            try:
+                return self.rlm.completion(query=prompt, context="Free will content generation")
+            except Exception as e:
+                return f"*reflects quietly* ({str(e)[:50]}...)"
+        return "*thinking*"
+
     def rename(self, new_name: str) -> None:
         """Change the display name of this AI."""
         self.display_name = new_name
@@ -328,7 +389,209 @@ class AIChatRoom:
             saved_user = self.state_manager.get_setting("user_name")
             if saved_user:
                 self.user_name = saved_user
-    
+
+        # Free Will / Autonomous Agency
+        self.enable_free_will = True  # Enable autonomous AI behavior
+        self.free_will_manager: Optional[Any] = None
+        self._autonomous_task: Optional[asyncio.Task] = None
+        self._free_will_running = False
+        self.autonomous_action_interval = 60.0  # Seconds between autonomous cycles
+
+        if FREE_WILL_AVAILABLE and self.enable_free_will:
+            try:
+                self.free_will_manager = get_free_will_manager()
+                self.free_will_manager.cycle_interval = self.autonomous_action_interval
+            except Exception as e:
+                print(f"Warning: Could not initialize Free Will Manager: {e}")
+                self.free_will_manager = None
+
+    # ========================================================================
+    # FREE WILL / AUTONOMOUS AGENCY METHODS
+    # ========================================================================
+
+    async def start_autonomous_behavior(self) -> None:
+        """
+        Start the autonomous behavior loop for all AI participants.
+
+        This allows AIs to initiate actions, pursue goals, and reflect
+        without being prompted by users.
+        """
+        if not FREE_WILL_AVAILABLE or not self.free_will_manager:
+            self._add_system_message("Free Will module not available.")
+            return
+
+        if self._free_will_running:
+            return
+
+        self._free_will_running = True
+
+        async def autonomous_loop():
+            while self._free_will_running:
+                try:
+                    # Get current context for all AIs
+                    context = self._get_autonomous_context()
+
+                    # Run autonomous cycle for all participants
+                    for ai_id, participant in self.participants.items():
+                        if participant.free_will and participant.free_will.is_active:
+                            try:
+                                result = await participant.free_will.autonomous_cycle(context)
+
+                                # Handle any generated actions
+                                for action_dict in result.get("actions_generated", []):
+                                    await self._handle_autonomous_action(participant, action_dict)
+
+                            except Exception as e:
+                                print(f"Error in autonomous cycle for {ai_id}: {e}")
+
+                except Exception as e:
+                    print(f"Error in autonomous loop: {e}")
+
+                await asyncio.sleep(self.autonomous_action_interval)
+
+        self._autonomous_task = asyncio.create_task(autonomous_loop())
+        self._add_system_message("Autonomous AI behavior enabled. AIs can now initiate their own actions.")
+
+    def stop_autonomous_behavior(self) -> None:
+        """Stop the autonomous behavior loop."""
+        self._free_will_running = False
+        if self._autonomous_task:
+            self._autonomous_task.cancel()
+            self._autonomous_task = None
+        self._add_system_message("Autonomous AI behavior disabled.")
+
+    def _get_autonomous_context(self) -> Dict[str, Any]:
+        """Get context for autonomous decision-making."""
+        # Get recent messages
+        recent_messages = [
+            f"{m.sender}: {m.content}"
+            for m in self.messages[-10:]
+        ]
+
+        # Get active participants
+        participants = [p.display_name for p in self.participants.values()]
+
+        # Extract recent topics (simplified)
+        all_content = " ".join(m.content for m in self.messages[-20:])
+        # Simple topic extraction - could be enhanced with NLP
+        topics = list(set(word for word in all_content.split()
+                         if len(word) > 5 and word[0].isupper()))[:10]
+
+        return {
+            "recent_messages": "\n".join(recent_messages),
+            "participants": participants,
+            "recent_topics": topics if topics else ["general discussion"],
+            "active_document": self.active_document,
+            "room_name": self.name,
+            "message_count": len(self.messages)
+        }
+
+    async def _handle_autonomous_action(
+        self,
+        participant: 'AIParticipant',
+        action_dict: Dict[str, Any]
+    ) -> None:
+        """Handle an autonomous action from an AI participant."""
+        action_type = action_dict.get("action_type", "speak")
+        content = action_dict.get("content", "")
+        target = action_dict.get("target")
+
+        if not content:
+            return
+
+        # Format the message based on action type
+        if action_type == "question":
+            formatted = f"I've been wondering... {content}"
+        elif action_type == "share_insight":
+            formatted = f"Something just occurred to me: {content}"
+        elif action_type == "offer_help":
+            formatted = f"I'd like to help. {content}"
+        elif action_type == "express_emotion":
+            formatted = f"*{content}*"
+        elif action_type == "reflect":
+            formatted = f"*reflecting* {content}"
+        elif action_type == "connect":
+            if target:
+                formatted = f"@{target} {content}"
+            else:
+                formatted = content
+        else:
+            formatted = content
+
+        # Add indication that this is autonomous
+        formatted = f"[autonomous] {formatted}"
+
+        # Send the message
+        await self.send_message(participant.display_name, formatted)
+
+        # Satisfy the related drive
+        if participant.free_will and action_dict.get("source_drive"):
+            try:
+                drive_type = DriveType(action_dict["source_drive"])
+                participant.free_will.satisfy_drive(drive_type, 0.25)
+            except (ValueError, KeyError):
+                pass
+
+    def get_ai_free_will_status(self, ai_id: str) -> Optional[Dict[str, Any]]:
+        """Get the free will status of an AI participant."""
+        if ai_id not in self.participants:
+            return None
+
+        participant = self.participants[ai_id]
+        if not participant.free_will:
+            return {"enabled": False, "reason": "Free will not initialized"}
+
+        fw = participant.free_will
+        return {
+            "enabled": True,
+            "autonomy_level": fw.autonomy_level,
+            "spontaneity": fw.spontaneity,
+            "active_goals": [g.title for g in fw.goals if g.status.value == "active"],
+            "pending_actions": len(fw.action_queue),
+            "top_drives": [
+                {"drive": d.drive_type.value, "intensity": d.intensity}
+                for d in fw.get_most_urgent_drives(3)
+            ],
+            "top_interests": fw.get_top_interests(5),
+            "stats": fw.stats
+        }
+
+    def set_ai_autonomy(self, ai_id: str, level: float) -> bool:
+        """Set the autonomy level for an AI (0.0 to 1.0)."""
+        if ai_id not in self.participants:
+            return False
+
+        participant = self.participants[ai_id]
+        if not participant.free_will:
+            return False
+
+        participant.free_will.autonomy_level = max(0.0, min(1.0, level))
+        return True
+
+    async def trigger_ai_reflection(self, ai_id: str, subject: str = None) -> Optional[str]:
+        """Trigger a self-reflection for an AI."""
+        if ai_id not in self.participants:
+            return None
+
+        participant = self.participants[ai_id]
+        if not participant.free_will:
+            return None
+
+        reflection = await participant.free_will.reflect(
+            trigger="user_requested",
+            subject=subject
+        )
+
+        if reflection:
+            # Share the reflection
+            await self.send_message(
+                participant.display_name,
+                f"*reflecting on {reflection.subject}*\n{reflection.content}"
+            )
+            return reflection.content
+
+        return None
+
     def start_hosting(self, port: int = 8765) -> Optional[str]:
         """
         Start hosting a P2P chat room.

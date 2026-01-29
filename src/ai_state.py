@@ -14,6 +14,7 @@ All data is stored in the public Documents folder for accessibility.
 import json
 import logging
 import os
+import sqlite3
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -258,9 +259,9 @@ class AIState:
         """Change the display name."""
         self.display_name = new_name
     
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self, include_history: bool = True) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        data = {
             "ai_id": self.ai_id,
             "display_name": self.display_name,
             "original_name": self.original_name,
@@ -270,7 +271,6 @@ class AIState:
             "current_emotion": self.current_emotion,
             "emotion_intensity": self.emotion_intensity,
             "mood_history": self.mood_history,
-            "chat_history": [h.to_dict() for h in self.chat_history],
             "max_history_size": self.max_history_size,
             "relationships": self.relationships,
             "memories": self.memories,
@@ -282,6 +282,11 @@ class AIState:
             "created_at": self.created_at,
             "last_active": self.last_active
         }
+
+        if include_history:
+            data["chat_history"] = [h.to_dict() for h in self.chat_history]
+
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "AIState":
@@ -326,11 +331,92 @@ class AIStateManager:
         """
         self.storage_dir = storage_dir or STORAGE_DIR
         self._ensure_storage_dir()
+
+        # Initialize DB
+        self.db_path = self.storage_dir / "ai_data.db"
+        self._init_db()
+        self._migrate_from_files()
+
         self._states: Dict[str, AIState] = {}
         self._private_conversations: Dict[str, PrivateConversation] = {}
         self._settings: Dict[str, Any] = {}
         self._load_all()
     
+    def _init_db(self) -> None:
+        """Initialize SQLite database and create tables."""
+        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
+
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS ai_states (
+                    ai_id TEXT PRIMARY KEY,
+                    data TEXT NOT NULL
+                )
+            """)
+
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ai_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    content TEXT,
+                    is_private BOOLEAN,
+                    private_with TEXT
+                )
+            """)
+
+            self.conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_chat_history_ai_ts
+                ON chat_history(ai_id, timestamp)
+            """)
+
+    def _migrate_from_files(self) -> None:
+        """Migrate existing JSON files to SQLite database."""
+        states_dir = self.storage_dir / "ai_states"
+        if not states_dir.exists():
+            return
+
+        for state_file in states_dir.glob("*.json"):
+            try:
+                # Load JSON
+                with open(state_file, 'r') as f:
+                    data = json.load(f)
+
+                ai_id = data.get("ai_id")
+                if not ai_id:
+                    continue
+
+                # Create state object to handle parsing
+                state = AIState.from_dict(data)
+
+                # Save metadata to DB
+                metadata = state.to_dict(include_history=False)
+                with self.conn:
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO ai_states (ai_id, data) VALUES (?, ?)",
+                        (ai_id, json.dumps(metadata))
+                    )
+
+                    # Save history to DB
+                    # Check if history already exists to avoid duplication on partial migration
+                    cursor = self.conn.execute("SELECT count(*) FROM chat_history WHERE ai_id=?", (ai_id,))
+                    if cursor.fetchone()[0] == 0 and state.chat_history:
+                        self.conn.executemany(
+                            """INSERT INTO chat_history
+                               (ai_id, timestamp, sender, content, is_private, private_with)
+                               VALUES (?, ?, ?, ?, ?, ?)""",
+                            [(ai_id, e.timestamp, e.sender, e.content, e.is_private, e.private_with)
+                             for e in state.chat_history]
+                        )
+
+                # Rename file
+                state_file.rename(state_file.with_suffix(".json.migrated"))
+                logger.info(f"Migrated {state_file.name} to database")
+
+            except Exception as e:
+                logger.error(f"Error migrating {state_file}: {e}")
+
     def _ensure_storage_dir(self) -> None:
         """Ensure storage directory exists."""
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -351,17 +437,48 @@ class AIStateManager:
     
     def _load_all(self) -> None:
         """Load all saved states and conversations."""
-        # Load AI states
-        states_dir = self.storage_dir / "ai_states"
-        if states_dir.exists():
-            for state_file in states_dir.glob("*.json"):
-                try:
-                    with open(state_file, 'r') as f:
-                        data = json.load(f)
-                    state = AIState.from_dict(data)
-                    self._states[state.ai_id] = state
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(f"Could not load state from {state_file}: {e}")
+        # Load AI states from DB
+        try:
+            with self.conn:
+                cursor = self.conn.execute("SELECT ai_id, data FROM ai_states")
+                for ai_id, data_json in cursor.fetchall():
+                    try:
+                        data = json.loads(data_json)
+                        state = AIState.from_dict(data)
+
+                        # Load chat history (last N messages)
+                        limit = state.max_history_size
+
+                        hist_cursor = self.conn.execute(
+                            """SELECT timestamp, sender, content, is_private, private_with
+                               FROM (
+                                   SELECT timestamp, sender, content, is_private, private_with
+                                   FROM chat_history
+                                   WHERE ai_id = ?
+                                   ORDER BY timestamp DESC
+                                   LIMIT ?
+                               ) ORDER BY timestamp ASC""",
+                            (ai_id, limit)
+                        )
+
+                        history = []
+                        for ts, sender, content, is_private, private_with in hist_cursor.fetchall():
+                            entry = ChatHistoryEntry(
+                                timestamp=ts,
+                                sender=sender,
+                                content=content,
+                                is_private=bool(is_private),
+                                private_with=private_with
+                            )
+                            history.append(entry)
+
+                        state.chat_history = history
+                        self._states[ai_id] = state
+
+                    except Exception as e:
+                        logger.error(f"Error loading state {ai_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error querying states: {e}")
         
         # Load private conversations
         chats_dir = self.storage_dir / "private_chats"
@@ -395,9 +512,36 @@ class AIStateManager:
             True if saved successfully
         """
         try:
-            file_path = self._get_state_file(state.ai_id)
-            with open(file_path, 'w') as f:
-                json.dump(state.to_dict(), f, indent=2)
+            # Save metadata (exclude history)
+            metadata = state.to_dict(include_history=False)
+
+            with self.conn:
+                self.conn.execute(
+                    "INSERT OR REPLACE INTO ai_states (ai_id, data) VALUES (?, ?)",
+                    (state.ai_id, json.dumps(metadata))
+                )
+
+                # Incremental History Update
+                cursor = self.conn.execute(
+                    "SELECT MAX(timestamp) FROM chat_history WHERE ai_id = ?",
+                    (state.ai_id,)
+                )
+                last_ts = cursor.fetchone()[0]
+
+                if last_ts:
+                    new_messages = [m for m in state.chat_history if m.timestamp > last_ts]
+                else:
+                    new_messages = state.chat_history
+
+                if new_messages:
+                    self.conn.executemany(
+                        """INSERT INTO chat_history
+                           (ai_id, timestamp, sender, content, is_private, private_with)
+                           VALUES (?, ?, ?, ?, ?, ?)""",
+                        [(state.ai_id, m.timestamp, m.sender, m.content, m.is_private, m.private_with)
+                         for m in new_messages]
+                    )
+
             self._states[state.ai_id] = state
             return True
         except Exception as e:
@@ -469,6 +613,12 @@ class AIStateManager:
         
         del self._states[ai_id]
         
+        # Delete from DB
+        with self.conn:
+            self.conn.execute("DELETE FROM ai_states WHERE ai_id = ?", (ai_id,))
+            self.conn.execute("DELETE FROM chat_history WHERE ai_id = ?", (ai_id,))
+
+        # Also clean up old file if exists
         file_path = self._get_state_file(ai_id)
         if file_path.exists():
             file_path.unlink()

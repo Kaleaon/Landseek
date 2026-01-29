@@ -8,6 +8,7 @@ and emotion tracking.
 import pytest
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -318,9 +319,18 @@ class TestAIStateManager:
         assert state.ai_id == "nova"
         assert state.display_name == "Nova"
         
-        # Check file was created
-        state_file = temp_storage / "ai_states" / "nova.json"
-        assert state_file.exists()
+        # Check data was created in DB
+        db_path = temp_storage / "ai_data.db"
+        assert db_path.exists()
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("SELECT data FROM ai_states WHERE ai_id = ?", ("nova",))
+        row = cursor.fetchone()
+        conn.close()
+
+        assert row is not None
+        data = json.loads(row[0])
+        assert data["display_name"] == "Nova"
     
     def test_get_state(self, temp_storage):
         """Test retrieving an AI state."""
@@ -489,9 +499,17 @@ class TestAIStateManager:
         
         manager.save_all()
         
-        # All files should exist
-        assert (temp_storage / "ai_states" / "nova.json").exists()
-        assert (temp_storage / "ai_states" / "echo.json").exists()
+        # All data should exist in DB
+        db_path = temp_storage / "ai_data.db"
+        assert db_path.exists()
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.execute("SELECT count(*) FROM ai_states")
+        count = cursor.fetchone()[0]
+        conn.close()
+
+        assert count == 2
+
         assert (temp_storage / "settings.json").exists()
 
 

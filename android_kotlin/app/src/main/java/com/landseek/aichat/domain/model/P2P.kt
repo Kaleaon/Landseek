@@ -22,7 +22,11 @@ import kotlinx.coroutines.flow.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import org.java_websocket.WebSocket
+import org.java_websocket.handshake.ClientHandshake
+import org.java_websocket.server.WebSocketServer
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.security.SecureRandom
 import java.time.Instant
@@ -268,8 +272,8 @@ class P2PNetworkManager(
     private var isHost: Boolean = false
     private var running: Boolean = false
     
-    // WebSocket connections would go here
-    // Using org.java_websocket:Java-WebSocket library
+    private val peerConnections = ConcurrentHashMap<String, WebSocket>()
+    private var server: WebSocketServer? = null
     
     /**
      * Host a new room.
@@ -429,6 +433,10 @@ class P2PNetworkManager(
         _peers.value = emptyMap()
         _connectionState.value = P2PConnectionState.Disconnected
         
+        server?.stop()
+        server = null
+        peerConnections.clear()
+
         scope.cancel()
     }
     
@@ -436,11 +444,47 @@ class P2PNetworkManager(
     
     private fun startServer(port: Int) {
         scope.launch {
-            // TODO: Implement WebSocket server using org.java_websocket.server.WebSocketServer
-            // 1. Create WebSocketServer subclass
-            // 2. Override onOpen, onClose, onMessage, onError
-            // 3. Call start() to begin accepting connections
-            // See: https://github.com/TooTallNate/Java-WebSocket
+            try {
+                val address = InetSocketAddress(port)
+                server = object : WebSocketServer(address) {
+                    override fun onOpen(conn: WebSocket, handshake: ClientHandshake) {
+                        println("P2P Server: Connection opened from ${conn.remoteSocketAddress}")
+                    }
+
+                    override fun onClose(conn: WebSocket, code: Int, reason: String, remote: Boolean) {
+                        println("P2P Server: Connection closed")
+                        val peerId = conn.getAttachment<String>()
+                        if (peerId != null) {
+                            peerConnections.remove(peerId)
+                        }
+                    }
+
+                    override fun onMessage(conn: WebSocket, message: String) {
+                        try {
+                            val p2pMessage = P2PMessage.fromJson(message)
+                            if (p2pMessage.type == P2PMessageType.HANDSHAKE.value) {
+                                peerConnections[p2pMessage.senderId] = conn
+                                conn.setAttachment(p2pMessage.senderId)
+                            }
+                            handleMessage(p2pMessage)
+                        } catch (e: Exception) {
+                            println("P2P Server: Error parsing message: ${e.message}")
+                        }
+                    }
+
+                    override fun onError(conn: WebSocket?, ex: Exception) {
+                        println("P2P Server: Error: ${ex.message}")
+                    }
+
+                    override fun onStart() {
+                        println("P2P Server: Started on port $port")
+                    }
+                }
+                server?.start()
+            } catch (e: Exception) {
+                _connectionState.value = P2PConnectionState.Error("Failed to start server: ${e.message}")
+                e.printStackTrace()
+            }
             
             // Start heartbeat loop
             while (running) {
@@ -482,7 +526,10 @@ class P2PNetworkManager(
     }
     
     private fun sendToPeer(peerId: String, message: P2PMessage) {
-        // Send message to specific peer via WebSocket
+        val conn = peerConnections[peerId]
+        if (conn != null && conn.isOpen) {
+            conn.send(message.toJson())
+        }
     }
     
     private fun sendHeartbeat() {
@@ -495,15 +542,16 @@ class P2PNetworkManager(
     }
     
     private fun cleanupDeadPeers() {
-        val currentPeers = _peers.value.toMutableMap()
-        val deadPeers = currentPeers.filter { !it.value.isAlive() }
-        
-        deadPeers.forEach { (id, peer) ->
-            currentPeers.remove(id)
-            handler.onPeerDisconnected(peer)
+        var deadPeers: Map<String, PeerInfo> = emptyMap()
+        _peers.update { currentPeers ->
+            val dead = currentPeers.filter { !it.value.isAlive() }
+            deadPeers = dead
+            currentPeers - dead.keys
         }
         
-        _peers.value = currentPeers
+        deadPeers.values.forEach { peer ->
+            handler.onPeerDisconnected(peer)
+        }
     }
     
     private fun handleMessage(message: P2PMessage) {
@@ -544,7 +592,7 @@ class P2PNetworkManager(
             port = 0
         )
         
-        _peers.value = _peers.value + (message.senderId to peer)
+        _peers.update { it + (message.senderId to peer) }
         handler.onPeerConnected(peer)
         
         // Send acknowledgment
@@ -575,19 +623,23 @@ class P2PNetworkManager(
     }
     
     private fun handleHeartbeat(message: P2PMessage) {
-        val currentPeers = _peers.value.toMutableMap()
-        currentPeers[message.senderId]?.let { peer ->
-            currentPeers[message.senderId] = peer.copy(lastHeartbeat = Instant.now().toString())
+        _peers.update { current ->
+            val peer = current[message.senderId]
+            if (peer != null) {
+                current + (message.senderId to peer.copy(lastHeartbeat = Instant.now().toString()))
+            } else {
+                current
+            }
         }
-        _peers.value = currentPeers
     }
     
     private fun handleDisconnect(message: P2PMessage) {
-        val peer = _peers.value[message.senderId]
-        if (peer != null) {
-            _peers.value = _peers.value - message.senderId
-            handler.onPeerDisconnected(peer)
+        var removedPeer: PeerInfo? = null
+        _peers.update { current ->
+            removedPeer = current[message.senderId]
+            current - message.senderId
         }
+        removedPeer?.let { handler.onPeerDisconnected(it) }
     }
     
     private fun handleChatMessage(message: P2PMessage) {
@@ -631,17 +683,18 @@ class P2PNetworkManager(
             port = 0
         )
         
-        _peers.value = _peers.value + (peerId to peer)
+        _peers.update { it + (peerId to peer) }
         handler.onPeerConnected(peer)
     }
     
     private fun handlePeerLeft(message: P2PMessage) {
         val peerId = message.payload["peer_id"] ?: return
-        val peer = _peers.value[peerId]
-        if (peer != null) {
-            _peers.value = _peers.value - peerId
-            handler.onPeerDisconnected(peer)
+        var removedPeer: PeerInfo? = null
+        _peers.update { current ->
+            removedPeer = current[peerId]
+            current - peerId
         }
+        removedPeer?.let { handler.onPeerDisconnected(it) }
     }
     
     private fun handleSyncRequest(message: P2PMessage) {

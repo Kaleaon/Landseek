@@ -6,6 +6,8 @@ package com.landseek.aichat.ui.documents
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,19 +27,42 @@ data class Document(
     val name: String,
     val mimeType: String,
     val sizeBytes: Long,
-    val uploadedAt: Long
+    val uploadedAt: Long,
+    val content: String? = null
 )
 
 @Composable
 fun DocumentsScreen() {
     val documents = remember {
         listOf(
-            Document(1, "report.txt", "text/plain", 15200, System.currentTimeMillis() - 3600000),
-            Document(2, "data.json", "application/json", 8500, System.currentTimeMillis() - 7200000),
-            Document(3, "notes.md", "text/markdown", 3200, System.currentTimeMillis() - 86400000)
+            Document(
+                1,
+                "report.txt",
+                "text/plain",
+                15200,
+                System.currentTimeMillis() - 3600000,
+                "Project Alpha Status Report\n\n- Phase 1: Completed\n- Phase 2: In Progress\n- Budget: On track"
+            ),
+            Document(
+                2,
+                "data.json",
+                "application/json",
+                8500,
+                System.currentTimeMillis() - 7200000,
+                "{\n  \"users\": 150,\n  \"active\": 120,\n  \"region\": \"US-East\"\n}"
+            ),
+            Document(
+                3,
+                "notes.md",
+                "text/markdown",
+                3200,
+                System.currentTimeMillis() - 86400000,
+                "# Meeting Notes\n\n## Attendees\n- Alice\n- Bob\n\n## Action Items\n1. Update UI\n2. Fix bugs"
+            )
         )
     }
     var selectedDocument by remember { mutableStateOf<Document?>(null) }
+    var viewingDocument by remember { mutableStateOf<Document?>(null) }
     
     Column(
         modifier = Modifier
@@ -124,7 +149,19 @@ fun DocumentsScreen() {
             document = document,
             onDismiss = { selectedDocument = null },
             onAnalyze = { /* TODO */ },
+            onViewContent = {
+                viewingDocument = document
+                selectedDocument = null
+            },
             onDelete = { /* TODO */ }
+        )
+    }
+
+    // Document content viewer
+    viewingDocument?.let { document ->
+        DocumentViewer(
+            document = document,
+            onDismiss = { viewingDocument = null }
         )
     }
 }
@@ -210,6 +247,7 @@ fun DocumentDetailSheet(
     document: Document,
     onDismiss: () -> Unit,
     onAnalyze: () -> Unit,
+    onViewContent: () -> Unit,
     onDelete: () -> Unit
 ) {
     ModalBottomSheet(
@@ -263,7 +301,7 @@ fun DocumentDetailSheet(
             Spacer(Modifier.height(8.dp))
             
             OutlinedButton(
-                onClick = { /* TODO: View content */ },
+                onClick = onViewContent,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Visibility, contentDescription = null)
@@ -286,6 +324,46 @@ fun DocumentDetailSheet(
             Spacer(Modifier.height(32.dp))
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DocumentViewer(
+    document: Document,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = document.name,
+                color = Color.White,
+                style = MaterialTheme.typography.titleLarge
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = document.content ?: "No content available",
+                    color = AITextSecondary,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = AIPrimary)
+            }
+        },
+        containerColor = AISurface,
+        textContentColor = AITextSecondary,
+        titleContentColor = Color.White
+    )
 }
 
 private fun formatFileSize(bytes: Long): String {

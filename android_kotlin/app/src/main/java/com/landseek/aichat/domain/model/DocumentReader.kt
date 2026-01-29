@@ -28,6 +28,7 @@ import kotlinx.serialization.Serializable
 import java.io.*
 import java.net.URL
 import java.time.Instant
+import org.apache.poi.xwpf.usermodel.XWPFDocument
 
 /**
  * Supported file extensions and their MIME types.
@@ -498,24 +499,39 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readDocxFile(file: File): DocumentReadResult {
-        // TODO: Implement DOCX text extraction using Apache POI or similar
-        // Add dependency: implementation("org.apache.poi:poi-ooxml:5.2.5")
-        // Usage: XWPFDocument(FileInputStream(file)) -> iterate paragraphs
         return try {
-            val metadata = mapOf(
-                "path" to file.absolutePath,
-                "size" to file.length().toString()
-            )
-            
-            DocumentReadResult.Success(
-                DocumentContent(
-                    text = "[Word Document: ${file.name}]\n\n⚠️ DOCX text extraction requires Apache POI library. Add 'org.apache.poi:poi-ooxml:5.2.5' to dependencies.",
-                    title = file.nameWithoutExtension,
-                    sourceType = "file",
-                    originalFormat = "docx",
-                    metadata = metadata
-                )
-            )
+            FileInputStream(file).use { fis ->
+                XWPFDocument(fis).use { document ->
+                    val textBuilder = StringBuilder()
+
+                    // Iterate paragraphs
+                    for (paragraph in document.paragraphs) {
+                        textBuilder.append(paragraph.text).append("\n")
+                    }
+
+                    val text = textBuilder.toString().trim()
+
+                    if (text.length > MAX_TEXT_SIZE) {
+                        return DocumentReadResult.Error("Document too large (max $MAX_TEXT_SIZE characters)")
+                    }
+
+                    val metadata = mapOf(
+                        "path" to file.absolutePath,
+                        "size" to file.length().toString(),
+                        "lastModified" to Instant.ofEpochMilli(file.lastModified()).toString()
+                    )
+
+                    DocumentReadResult.Success(
+                        DocumentContent(
+                            text = text,
+                            title = file.nameWithoutExtension,
+                            sourceType = "file",
+                            originalFormat = "docx",
+                            metadata = metadata
+                        )
+                    )
+                }
+            }
         } catch (e: Exception) {
             DocumentReadResult.Error("Error reading DOCX: ${e.message}")
         }

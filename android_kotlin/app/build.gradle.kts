@@ -51,7 +51,7 @@ android {
     }
     
     composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.4"
+        kotlinCompilerExtensionVersion = "1.5.8"
     }
     
     packaging {
@@ -116,6 +116,9 @@ dependencies {
     // PDF Processing
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     
+    // DOCX Processing
+    implementation("org.apache.poi:poi-ooxml:5.2.5")
+
     // Image Processing
     implementation("io.coil-kt:coil-compose:2.5.0")
     

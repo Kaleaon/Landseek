@@ -13,7 +13,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.landseek.aichat.data.repository.MessageRepository
 import com.landseek.aichat.data.repository.AIStateRepository
-import com.landseek.aichat.domain.model.BUILTIN_PERSONALITIES
+import com.landseek.aichat.domain.model.PersonalityDefinition
 import com.landseek.aichat.ui.theme.AIColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -44,8 +44,16 @@ class ChatViewModel @Inject constructor(
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages.asStateFlow()
     
-    private val _activeAIs = MutableStateFlow<List<ActiveAI>>(emptyList())
-    val activeAIs: StateFlow<List<ActiveAI>> = _activeAIs.asStateFlow()
+    val activeAIs: StateFlow<List<ActiveAI>> = aiStateRepository.getAllPersonalities()
+        .map { personalities ->
+            personalities
+                .filter { it.isActive }
+                .map { toActiveAI(it) }
+        }
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val personalities: StateFlow<List<PersonalityDefinition>> = aiStateRepository.getAllPersonalities()
+        .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
     
     private val _inputText = MutableStateFlow("")
     val inputText: StateFlow<String> = _inputText.asStateFlow()
@@ -62,20 +70,14 @@ class ChatViewModel @Inject constructor(
     val currentThought: StateFlow<String> = _currentThought.asStateFlow()
     
     init {
-        initializeDefaultAIs()
+        syncPersonalities()
         loadWelcomeMessages()
     }
     
-    private fun initializeDefaultAIs() {
-        val defaultAIs = BUILTIN_PERSONALITIES.take(3).map { p ->
-            ActiveAI(
-                id = p.name.lowercase(),
-                name = p.name,
-                avatar = p.avatar,
-                isActive = true
-            )
+    private fun syncPersonalities() {
+        viewModelScope.launch {
+            aiStateRepository.syncDefaultPersonalities()
         }
-        _activeAIs.value = defaultAIs
     }
     
     private fun loadWelcomeMessages() {
@@ -145,7 +147,7 @@ class ChatViewModel @Inject constructor(
     }
     
     private suspend fun simulateAIResponses(userText: String) {
-        val activeAIList = _activeAIs.value.filter { it.isActive }
+        val activeAIList = activeAIs.value.filter { it.isActive }
         
         for (ai in activeAIList) {
             simulateSingleAIResponse(ai, userText)
@@ -228,7 +230,7 @@ class ChatViewModel @Inject constructor(
         val userText = lastUserMessage?.content ?: return
 
         // Find AI by name.
-        val ai = _activeAIs.value.find { it.name == message.sender }
+        val ai = activeAIs.value.find { it.name == message.sender }
 
         if (ai != null) {
             viewModelScope.launch {
@@ -266,25 +268,38 @@ class ChatViewModel @Inject constructor(
     }
     
     fun toggleAI(aiId: String) {
-        _activeAIs.value = _activeAIs.value.map { ai ->
-            if (ai.id == aiId) ai.copy(isActive = !ai.isActive)
-            else ai
+        viewModelScope.launch {
+            val currentState = aiStateRepository.getByAiId(aiId)
+            if (currentState != null) {
+                aiStateRepository.setActive(aiId, !currentState.isActive)
+            }
         }
     }
     
     fun addAI(aiId: String) {
-        val personality = BUILTIN_PERSONALITIES.find { it.name.lowercase() == aiId }
-        if (personality != null && _activeAIs.value.none { it.id == aiId }) {
-            _activeAIs.value = _activeAIs.value + ActiveAI(
-                id = aiId,
-                name = personality.name,
-                avatar = personality.avatar,
-                isActive = true
-            )
+        viewModelScope.launch {
+            aiStateRepository.setActive(aiId, true)
         }
     }
     
     fun removeAI(aiId: String) {
-        _activeAIs.value = _activeAIs.value.filter { it.id != aiId }
+        viewModelScope.launch {
+            aiStateRepository.setActive(aiId, false)
+        }
+    }
+
+    fun renameAI(aiId: String, newName: String) {
+        viewModelScope.launch {
+            aiStateRepository.updateDisplayName(aiId, newName)
+        }
+    }
+
+    private fun toActiveAI(def: PersonalityDefinition): ActiveAI {
+        return ActiveAI(
+            id = def.id,
+            name = def.name,
+            avatar = def.avatar,
+            isActive = def.isActive
+        )
     }
 }

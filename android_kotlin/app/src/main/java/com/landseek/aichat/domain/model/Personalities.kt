@@ -42,7 +42,9 @@ data class PersonalityDefinition(
     val model: String? = null,
     val systemPrompt: String? = null,
     val temperature: Float = 0.7f,
-    val maxTokens: Int = 500
+    val maxTokens: Int = 500,
+    val id: String = name.lowercase(),
+    val isActive: Boolean = true
 )
 
 /**

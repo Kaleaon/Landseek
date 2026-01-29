@@ -30,7 +30,7 @@ import com.landseek.aichat.ui.theme.*
 fun ParticipantsScreen(
     viewModel: ChatViewModel
 ) {
-    val personalities = BUILTIN_PERSONALITIES
+    val personalities by viewModel.personalities.collectAsState()
     val activeAIs by viewModel.activeAIs.collectAsState()
     var selectedPersonality by remember { mutableStateOf<PersonalityDefinition?>(null) }
     
@@ -61,7 +61,7 @@ fun ParticipantsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(personalities) { personality ->
-                val activeAI = activeAIs.find { it.id == personality.name.lowercase() }
+                val activeAI = activeAIs.find { it.id == personality.id }
                 val isActive = activeAI?.isActive == true
 
                 PersonalityCard(
@@ -69,10 +69,10 @@ fun ParticipantsScreen(
                     isActive = isActive,
                     onToggle = { active ->
                         if (active) {
-                            if (activeAI == null) viewModel.addAI(personality.name.lowercase())
-                            else if (!isActive) viewModel.toggleAI(personality.name.lowercase())
+                            if (activeAI == null) viewModel.addAI(personality.id)
+                            else if (!isActive) viewModel.toggleAI(personality.id)
                         } else {
-                            if (isActive) viewModel.toggleAI(personality.name.lowercase())
+                            if (isActive) viewModel.toggleAI(personality.id)
                         }
                     },
                     onClick = { selectedPersonality = personality }
@@ -87,7 +87,10 @@ fun ParticipantsScreen(
             personality = personality,
             onDismiss = { selectedPersonality = null },
             onStartPrivateChat = { /* TODO */ },
-            onRename = { /* TODO */ }
+            onRename = { newName ->
+                viewModel.renameAI(personality.id, newName)
+                selectedPersonality = null
+            }
         )
     }
 }
@@ -101,7 +104,7 @@ fun PersonalityCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accentColor = AIColors.getColorForAI(personality.name)
+    val accentColor = AIColors.getColorForAI(personality.id)
     
     Card(
         onClick = onClick,

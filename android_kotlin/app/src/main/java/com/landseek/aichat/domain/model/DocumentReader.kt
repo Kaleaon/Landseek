@@ -24,6 +24,9 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlinx.serialization.Serializable
 import java.io.*
 import java.net.URL
@@ -150,6 +153,15 @@ sealed class DocumentReadResult {
  * Document Reader for multi-format document processing.
  */
 class DocumentReader(private val context: Context? = null) {
+
+    private var isPdfBoxInitialized = false
+
+    init {
+        if (context != null) {
+            PDFBoxResourceLoader.init(context)
+            isPdfBoxInitialized = true
+        }
+    }
     
     companion object {
         // Maximum image dimension for Gemma 3 (normalized to 896x896)
@@ -475,22 +487,34 @@ class DocumentReader(private val context: Context? = null) {
     }
     
     private fun readPdfFile(file: File): DocumentReadResult {
-        // TODO: Implement PDF text extraction using com.tom_roush:pdfbox-android
-        // Add dependency: implementation("com.tom-roush:pdfbox-android:2.0.27.0")
-        // Usage: PDDocument.load(file) -> pdfStripper.getText(document)
+        if (!isPdfBoxInitialized) {
+            return DocumentReadResult.Error("PDF processing requires Context to be initialized.")
+        }
+
         return try {
+            var text: String
+            var pages: Int
+
+            PDDocument.load(file).use { document ->
+                val stripper = PDFTextStripper()
+                text = stripper.getText(document)
+                pages = document.numberOfPages
+            }
+
             val metadata = mapOf(
                 "path" to file.absolutePath,
-                "size" to file.length().toString()
+                "size" to file.length().toString(),
+                "pages" to pages.toString()
             )
             
             DocumentReadResult.Success(
                 DocumentContent(
-                    text = "[PDF Document: ${file.name}]\n\n⚠️ PDF text extraction requires pdfbox-android library. Add 'com.tom-roush:pdfbox-android:2.0.27.0' to dependencies.",
+                    text = text.trim(),
                     title = file.nameWithoutExtension,
                     sourceType = "file",
                     originalFormat = "pdf",
-                    metadata = metadata
+                    metadata = metadata,
+                    pages = pages
                 )
             )
         } catch (e: Exception) {

@@ -60,6 +60,9 @@ class ChatViewModel @Inject constructor(
     // Current AI thought/reasoning for ThinkingBlock
     private val _currentThought = MutableStateFlow("")
     val currentThought: StateFlow<String> = _currentThought.asStateFlow()
+
+    private val _currentAttachment = MutableStateFlow<Attachment?>(null)
+    val currentAttachment: StateFlow<Attachment?> = _currentAttachment.asStateFlow()
     
     init {
         initializeDefaultAIs()
@@ -115,15 +118,26 @@ class ChatViewModel @Inject constructor(
     fun onInputTextChange(text: String) {
         _inputText.value = text
     }
+
+    fun onAttachmentSelected(attachment: Attachment) {
+        _currentAttachment.value = attachment
+    }
+
+    fun clearAttachment() {
+        _currentAttachment.value = null
+    }
     
     fun sendMessage() {
         val text = _inputText.value.trim()
-        if (text.isBlank() || _isProcessing.value) return
+        val attachment = _currentAttachment.value
+
+        if ((text.isBlank() && attachment == null) || _isProcessing.value) return
         
         viewModelScope.launch {
             _isProcessing.value = true
             _uiState.value = ChatUiState.Loading
             _inputText.value = ""
+            clearAttachment()
             
             // Add user message
             val userMessage = ChatMessage(
@@ -131,7 +145,8 @@ class ChatViewModel @Inject constructor(
                 avatar = "👤",
                 content = text,
                 isUser = true,
-                senderColor = Color.White
+                senderColor = Color.White,
+                attachment = attachment
             )
             _messages.value = _messages.value + userMessage
             

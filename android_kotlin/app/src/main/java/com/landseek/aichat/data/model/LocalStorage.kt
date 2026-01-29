@@ -259,6 +259,9 @@ interface MessageDao {
     
     @Query("SELECT COUNT(*) FROM messages")
     suspend fun getMessageCount(): Int
+
+    @Query("DELETE FROM messages")
+    suspend fun deleteAllMessages()
 }
 
 /**

@@ -259,6 +259,9 @@ interface MessageDao {
     
     @Query("SELECT COUNT(*) FROM messages")
     suspend fun getMessageCount(): Int
+
+    @Query("SELECT * FROM messages")
+    suspend fun getAllMessagesList(): List<MessageEntity>
 }
 
 /**
@@ -298,6 +301,9 @@ interface AIStateDao {
     
     @Query("UPDATE ai_states SET current_emotion = :emotion, emotion_intensity = :intensity WHERE ai_id = :aiId")
     suspend fun updateEmotion(aiId: String, emotion: String, intensity: Float)
+
+    @Query("SELECT * FROM ai_states")
+    suspend fun getAllStatesList(): List<AIStateEntity>
 }
 
 /**
@@ -316,6 +322,9 @@ interface PrivateConversationDao {
     
     @Query("DELETE FROM private_conversations WHERE participant_a = :participantA AND participant_b = :participantB")
     suspend fun delete(participantA: String, participantB: String)
+
+    @Query("SELECT * FROM private_conversations")
+    suspend fun getAllConversationsList(): List<PrivateConversationEntity>
 }
 
 /**
@@ -337,6 +346,9 @@ interface SettingsDao {
     
     @Query("DELETE FROM settings WHERE `key` = :key")
     suspend fun delete(key: String)
+
+    @Query("SELECT * FROM settings")
+    suspend fun getAllSettingsList(): List<SettingsEntity>
 }
 
 /**
@@ -382,4 +394,7 @@ interface DocumentDao {
     
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM documents")
+    suspend fun getAllDocumentsList(): List<DocumentEntity>
 }

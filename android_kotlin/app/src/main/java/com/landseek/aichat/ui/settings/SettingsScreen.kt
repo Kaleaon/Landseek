@@ -20,12 +20,21 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.hilt.navigation.compose.hiltViewModel
+import android.widget.Toast
 import com.landseek.aichat.domain.model.*
 import com.landseek.aichat.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
     var userName by remember { mutableStateOf("User") }
     var selectedModel by remember { mutableStateOf("gemma3-4b-gguf") }
     var ollamaUrl by remember { mutableStateOf("http://localhost:11434") }
@@ -42,6 +51,63 @@ fun SettingsScreen() {
     val p2pManager = remember { getP2PNetworkManager() }
     val connectionState by p2pManager.connectionState.collectAsState()
     val scope = rememberCoroutineScope()
+
+    val context = LocalContext.current
+    val uiState by viewModel.uiState.collectAsState()
+
+    // Handle UI State feedback
+    LaunchedEffect(uiState) {
+        when (val state = uiState) {
+            is SettingsUiState.Success -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_SHORT).show()
+                viewModel.resetUiState()
+            }
+            is SettingsUiState.Error -> {
+                Toast.makeText(context, state.message, Toast.LENGTH_LONG).show()
+                viewModel.resetUiState()
+            }
+            else -> {}
+        }
+    }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        uri?.let {
+            scope.launch {
+                try {
+                    val json = viewModel.getExportDataJson()
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(it)?.use { output ->
+                            output.write(json.toByteArray())
+                        }
+                    }
+                    Toast.makeText(context, "Data exported successfully", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        uri?.let {
+            scope.launch {
+                try {
+                    val json = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(it)?.bufferedReader().use { reader ->
+                            reader?.readText()
+                        }
+                    }
+                    json?.let { viewModel.importData(it) }
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Read failed: ${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
     
     Column(
         modifier = Modifier
@@ -266,7 +332,10 @@ fun SettingsScreen() {
                 label = "Export Data",
                 description = "Save chat history and settings",
                 icon = Icons.Default.Download,
-                onClick = { /* TODO */ }
+                onClick = {
+                    val timestamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault()).format(java.util.Date())
+                    exportLauncher.launch("aichat_backup_$timestamp.json")
+                }
             )
             
             Spacer(Modifier.height(8.dp))
@@ -275,7 +344,9 @@ fun SettingsScreen() {
                 label = "Import Data",
                 description = "Restore from backup",
                 icon = Icons.Default.Upload,
-                onClick = { /* TODO */ }
+                onClick = {
+                    importLauncher.launch(arrayOf("application/json"))
+                }
             )
             
             Spacer(Modifier.height(8.dp))
@@ -284,7 +355,7 @@ fun SettingsScreen() {
                 label = "Clear History",
                 description = "Delete all chat messages",
                 icon = Icons.Default.Delete,
-                onClick = { /* TODO */ },
+                onClick = { viewModel.clearHistory() },
                 isDestructive = true
             )
         }

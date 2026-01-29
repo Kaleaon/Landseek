@@ -42,6 +42,9 @@ class MessageRepository @Inject constructor(
     
     suspend fun getMessageCount(): Int = 
         messageDao.getMessageCount()
+
+    suspend fun getAllMessagesList(): List<MessageEntity> =
+        messageDao.getAllMessagesList()
 }
 
 /**
@@ -83,6 +86,9 @@ class AIStateRepository @Inject constructor(
     
     suspend fun updateEmotion(aiId: String, emotion: String, intensity: Float) = 
         aiStateDao.updateEmotion(aiId, emotion, intensity)
+
+    suspend fun getAllStatesList(): List<AIStateEntity> =
+        aiStateDao.getAllStatesList()
 }
 
 /**
@@ -103,6 +109,9 @@ class PrivateConversationRepository @Inject constructor(
     
     suspend fun delete(participantA: String, participantB: String) =
         conversationDao.delete(participantA, participantB)
+
+    suspend fun getAllConversationsList(): List<PrivateConversationEntity> =
+        conversationDao.getAllConversationsList()
 }
 
 /**
@@ -126,6 +135,9 @@ class SettingsRepository @Inject constructor(
     
     suspend fun delete(key: String) = 
         settingsDao.delete(key)
+
+    suspend fun getAllSettingsList(): List<SettingsEntity> =
+        settingsDao.getAllSettingsList()
 }
 
 /**
@@ -175,4 +187,7 @@ class DocumentRepository @Inject constructor(
     
     suspend fun deleteById(id: Long) = 
         documentDao.deleteById(id)
+
+    suspend fun getAllDocumentsList(): List<DocumentEntity> =
+        documentDao.getAllDocumentsList()
 }

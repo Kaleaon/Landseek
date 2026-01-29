@@ -17,7 +17,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.landseek.aichat.ui.chat.ChatScreen
+import com.landseek.aichat.ui.chat.ChatViewModel
 import com.landseek.aichat.ui.participants.ParticipantsScreen
 import com.landseek.aichat.ui.settings.SettingsScreen
 import com.landseek.aichat.ui.documents.DocumentsScreen
@@ -47,6 +49,8 @@ val bottomNavItems = listOf(
 @Composable
 fun AIChatApp() {
     val navController = rememberNavController()
+    // Shared ViewModel scoped to Activity (or the parent of AIChatApp)
+    val viewModel: ChatViewModel = hiltViewModel()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     
@@ -133,8 +137,8 @@ fun AIChatApp() {
                 startDestination = Screen.Chat.route,
                 modifier = Modifier.padding(innerPadding)
             ) {
-                composable(Screen.Chat.route) { ChatScreen() }
-                composable(Screen.Participants.route) { ParticipantsScreen() }
+                composable(Screen.Chat.route) { ChatScreen(viewModel) }
+                composable(Screen.Participants.route) { ParticipantsScreen(viewModel) }
                 composable(Screen.Documents.route) { DocumentsScreen() }
                 composable(Screen.Tools.route) { ToolsScreen() }
                 composable(Screen.Settings.route) { SettingsScreen() }

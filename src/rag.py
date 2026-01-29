@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple, Set, Callable
 from enum import Enum
 import bisect
+import numpy as np
 
 
 # Set up logging
@@ -472,6 +473,11 @@ class AIRAGStore:
         self.chunks: Dict[str, TextChunk] = {}
         self.stats = RAGStats()
         
+        # Semantic search cache
+        self._embedding_matrix: Optional[np.ndarray] = None
+        self._chunk_ids_list: Optional[List[str]] = None
+        self._chunk_id_to_index: Optional[Dict[str, int]] = None
+
         # Ensure storage directory exists
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         
@@ -760,6 +766,9 @@ class AIRAGStore:
         # Update stats
         self._update_stats()
         
+        # Invalidate cache
+        self._embedding_matrix = None
+
         # Enforce token limit
         self._enforce_token_limit()
     
@@ -772,6 +781,9 @@ class AIRAGStore:
         self.keyword_index.remove(chunk_id)
         self._update_stats()
         
+        # Invalidate cache
+        self._embedding_matrix = None
+
         return True
     
     def remove_document(self, source: str) -> int:
@@ -796,6 +808,33 @@ class AIRAGStore:
             # Re-embed all chunks with updated model
             for chunk in self.chunks.values():
                 chunk.embedding = self.embedding_model.embed(chunk.content)
+
+            self._embedding_matrix = None  # Invalidate cache
+
+    def _rebuild_index(self) -> None:
+        """Rebuild the numpy embedding index."""
+        chunk_ids = []
+        embeddings = []
+
+        for chunk_id, chunk in self.chunks.items():
+            if chunk.embedding:
+                chunk_ids.append(chunk_id)
+                embeddings.append(chunk.embedding)
+
+        if embeddings:
+            matrix = np.array(embeddings, dtype=np.float32)
+            # Normalize rows to ensure cosine similarity is just dot product
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            # Avoid division by zero
+            norms[norms == 0] = 1.0
+            self._embedding_matrix = matrix / norms
+
+            self._chunk_ids_list = chunk_ids
+            self._chunk_id_to_index = {cid: i for i, cid in enumerate(chunk_ids)}
+        else:
+            self._embedding_matrix = np.empty((0, 0), dtype=np.float32)
+            self._chunk_ids_list = []
+            self._chunk_id_to_index = {}
     
     def retrieve(
         self, 
@@ -926,13 +965,58 @@ class AIRAGStore:
         """Perform semantic search using embeddings."""
         query_embedding = self.embedding_model.embed(query)
         
+        # Ensure index is built
+        if self._embedding_matrix is None:
+            self._rebuild_index()
+
+        # Convert query to numpy and normalize
+        query_vec = np.array(query_embedding, dtype=np.float32)
+        query_norm = np.linalg.norm(query_vec)
+        if query_norm > 0:
+            query_vec = query_vec / query_norm
+
         results = []
-        for chunk in chunks:
-            if chunk.embedding:
-                score = SimpleEmbedding.cosine_similarity(query_embedding, chunk.embedding)
+
+        # Split chunks into indexed and unindexed
+        indexed_indices = []
+        indexed_chunks = []
+
+        # Check if we have a valid index
+        has_index = self._embedding_matrix is not None and self._embedding_matrix.size > 0
+
+        if has_index:
+            for chunk in chunks:
+                if chunk.chunk_id in self._chunk_id_to_index:
+                    indexed_indices.append(self._chunk_id_to_index[chunk.chunk_id])
+                    indexed_chunks.append(chunk)
+                elif chunk.embedding:
+                    # Unindexed chunk (fallback)
+                    score = SimpleEmbedding.cosine_similarity(query_embedding, chunk.embedding)
+                    results.append(RetrievalResult(
+                        chunk=chunk,
+                        score=score,
+                        strategy="semantic"
+                    ))
+        else:
+            # No index available, fallback for all
+            for chunk in chunks:
+                if chunk.embedding:
+                    score = SimpleEmbedding.cosine_similarity(query_embedding, chunk.embedding)
+                    results.append(RetrievalResult(
+                        chunk=chunk,
+                        score=score,
+                        strategy="semantic"
+                    ))
+
+        # Batch process indexed chunks
+        if indexed_indices:
+            sub_matrix = self._embedding_matrix[indexed_indices]
+            scores = sub_matrix @ query_vec
+
+            for i, score in enumerate(scores):
                 results.append(RetrievalResult(
-                    chunk=chunk,
-                    score=score,
+                    chunk=indexed_chunks[i],
+                    score=float(score),
                     strategy="semantic"
                 ))
         
@@ -1003,6 +1087,9 @@ class AIRAGStore:
         self.keyword_index = KeywordIndex()
         self.embedding_model = SimpleEmbedding()
         self.stats = RAGStats()
+        self._embedding_matrix = None
+        self._chunk_ids_list = None
+        self._chunk_id_to_index = None
         self._save()
     
     def export_data(self) -> Dict[str, Any]:

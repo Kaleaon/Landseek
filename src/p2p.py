@@ -745,11 +745,11 @@ class P2PClient:
         )
         self._send_message(message.to_json())
     
-    def request_ai_response(self, ai_name: str, prompt: str) -> str:
+    async def request_ai_response(self, ai_name: str, prompt: str) -> str:
         """
         Request an AI response from the host.
         
-        This is a blocking call that waits for the response.
+        This is an async call that waits for the response without blocking the loop.
         """
         request_id = str(uuid.uuid4())
         
@@ -768,7 +768,11 @@ class P2PClient:
         event = threading.Event()
         self._pending_requests[request_id] = event
         
-        if event.wait(timeout=120):  # 2 minute timeout
+        # Use run_in_executor to wait for the threading event without blocking the async loop
+        loop = asyncio.get_event_loop()
+        is_set = await loop.run_in_executor(None, event.wait, 120)  # 2 minute timeout
+
+        if is_set:
             response = self._responses.pop(request_id, "")
             del self._pending_requests[request_id]
             return response

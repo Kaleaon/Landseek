@@ -1101,6 +1101,8 @@ class AIRAGStore:
         # Split chunks into indexed and unindexed
         indexed_indices = []
         indexed_chunks = []
+        fallback_chunks = []
+        fallback_embeddings = []
 
         # Check if we have a valid index
         has_index = self._embedding_matrix is not None and self._embedding_matrix.size > 0
@@ -1112,22 +1114,14 @@ class AIRAGStore:
                     indexed_chunks.append(chunk)
                 elif chunk.embedding:
                     # Unindexed chunk (fallback)
-                    score = SimpleEmbedding.cosine_similarity(query_embedding, chunk.embedding)
-                    results.append(RetrievalResult(
-                        chunk=chunk,
-                        score=score,
-                        strategy="semantic"
-                    ))
+                    fallback_chunks.append(chunk)
+                    fallback_embeddings.append(chunk.embedding)
         else:
             # No index available, fallback for all
             for chunk in chunks:
                 if chunk.embedding:
-                    score = SimpleEmbedding.cosine_similarity(query_embedding, chunk.embedding)
-                    results.append(RetrievalResult(
-                        chunk=chunk,
-                        score=score,
-                        strategy="semantic"
-                    ))
+                    fallback_chunks.append(chunk)
+                    fallback_embeddings.append(chunk.embedding)
 
         # Batch process indexed chunks
         if indexed_indices:
@@ -1137,6 +1131,39 @@ class AIRAGStore:
             for i, score in enumerate(scores):
                 results.append(RetrievalResult(
                     chunk=indexed_chunks[i],
+                    score=float(score),
+                    strategy="semantic"
+                ))
+
+        # Batch process fallback chunks
+        if fallback_embeddings:
+            fallback_matrix = np.array(fallback_embeddings, dtype=np.float32)
+
+            # Handle dimension mismatch with query_vec (SimpleEmbedding padding logic)
+            q_len = query_vec.shape[0]
+            m_len = fallback_matrix.shape[1]
+
+            current_query_vec = query_vec
+
+            if q_len != m_len:
+                max_len = max(q_len, m_len)
+                if q_len < max_len:
+                    current_query_vec = np.pad(current_query_vec, (0, max_len - q_len))
+                if m_len < max_len:
+                    # Pad columns
+                    fallback_matrix = np.pad(fallback_matrix, ((0, 0), (0, max_len - m_len)))
+
+            # Normalize rows
+            norms = np.linalg.norm(fallback_matrix, axis=1, keepdims=True)
+            # Avoid division by zero
+            norms[norms == 0] = 1.0
+            fallback_matrix = fallback_matrix / norms
+
+            scores = fallback_matrix @ current_query_vec
+
+            for i, score in enumerate(scores):
+                results.append(RetrievalResult(
+                    chunk=fallback_chunks[i],
                     score=float(score),
                     strategy="semantic"
                 ))

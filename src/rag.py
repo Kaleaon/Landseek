@@ -922,7 +922,14 @@ class AIRAGStore:
     
     def _update_embedding_model(self) -> None:
         """Update the embedding model with current chunks."""
-        if len(self.chunks) > 10:  # Only refit if we have enough data
+        # Only refit if we have enough data and significant growth (20%)
+        # This avoids O(N^2) re-embedding on every insertion
+        should_refit = (
+            len(self.chunks) > 10 and
+            len(self.chunks) > self.embedding_model.doc_count * 1.2
+        )
+
+        if should_refit:
             texts = [c.content for c in self.chunks.values()]
             self.embedding_model.fit(texts)
             

@@ -19,6 +19,7 @@ import os
 import re
 import hashlib
 import sqlite3
+import concurrent.futures
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
@@ -1521,8 +1522,18 @@ class RAGManager:
             Dict mapping ai_id to retrieval results
         """
         results = {}
-        for ai_id, store in self._stores.items():
-            results[ai_id] = store.retrieve(query, top_k)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Submit all tasks
+            future_to_ai = {
+                executor.submit(store.retrieve, query, top_k): ai_id
+                for ai_id, store in self._stores.items()
+            }
+
+            # Collect results in order to preserve dict insertion order and exception behavior
+            for future, ai_id in future_to_ai.items():
+                results[ai_id] = future.result()
+
         return results
 
 

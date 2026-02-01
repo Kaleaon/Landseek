@@ -127,8 +127,10 @@ data class ToolDefinition(
 
 /**
  * Definition for an AI personality (used by Add-ons).
+ * Note: This is distinct from PersonalityDefinition in Personalities.kt which is used
+ * for the main chat room personalities. This class is specifically for addon-defined personalities.
  */
-data class PersonalityDefinition(
+data class AddonPersonalityDefinition(
     val id: String,
     val name: String,
     val description: String,

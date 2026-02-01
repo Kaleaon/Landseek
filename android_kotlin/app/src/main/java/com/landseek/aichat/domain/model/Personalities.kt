@@ -257,11 +257,6 @@ class PersonalityManager(
 val personalityManager = PersonalityManager()
 
 /**
- * Get the global personality manager.
- */
-fun getPersonalityManager(): PersonalityManager = personalityManager
-
-/**
  * Get default personalities for quick setup.
  *
  * @param count Number of personalities (1-10)

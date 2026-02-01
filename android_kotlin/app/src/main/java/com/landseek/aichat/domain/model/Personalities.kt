@@ -257,9 +257,9 @@ class PersonalityManager(
 val personalityManager = PersonalityManager()
 
 /**
- * Get the global personality manager.
+ * Get the global personality manager instance.
  */
-fun getPersonalityManager(): PersonalityManager = personalityManager
+fun getPersonalityManagerInstance(): PersonalityManager = personalityManager
 
 /**
  * Get default personalities for quick setup.

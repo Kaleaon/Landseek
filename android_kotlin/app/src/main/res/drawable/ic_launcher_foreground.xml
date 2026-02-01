@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108"
+    android:tint="#FFFFFF">
+    <!-- AI Chat icon: speech bubble with AI symbol -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,27c-14.9,0 -27,10.7 -27,24c0,7.5 3.8,14.2 9.7,18.7L33,81l12.3,-6.2c2.7,0.7 5.6,1.2 8.7,1.2c14.9,0 27,-10.7 27,-24S68.9,27 54,27z"/>
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M45,45h18v4h-18z"/>
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M45,53h14v4h-14z"/>
+    <path
+        android:fillColor="@color/ic_launcher_background"
+        android:pathData="M45,61h10v4h-10z"/>
+</vector>

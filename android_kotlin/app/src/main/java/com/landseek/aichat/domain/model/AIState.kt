@@ -149,7 +149,7 @@ data class AIState(
 
     // Custom traits and memories
     val memories: MutableList<String> = mutableListOf(),
-    val customTraits: MutableMap<String, Any> = mutableMapOf(),
+    val customTraits: MutableMap<String, String> = mutableMapOf(),
 
     // Settings
     var model: String? = null,

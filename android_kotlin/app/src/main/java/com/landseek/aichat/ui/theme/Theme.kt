@@ -150,22 +150,3 @@ fun AIChatTheme(
         content = content
     )
 }
-
-/**
- * Legacy theme function for backward compatibility
- * Note: Uses ThemeMode.SYSTEM by default to preserve original behavior
- */
-@Composable
-fun AIChatTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
-    content: @Composable () -> Unit
-) {
-    // Use SYSTEM theme mode to preserve original behavior where darkTheme
-    // parameter defaults to isSystemInDarkTheme()
-    AIChatTheme(
-        themeMode = ThemeMode.SYSTEM,
-        dynamicTheme = if (dynamicColor) DynamicTheme.ON else DynamicTheme.OFF,
-        content = content
-    )
-}

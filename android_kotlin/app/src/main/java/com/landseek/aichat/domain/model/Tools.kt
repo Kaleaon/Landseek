@@ -128,7 +128,7 @@ data class ToolDefinition(
 /**
  * Definition for an AI personality (used by Add-ons).
  */
-data class PersonalityDefinition(
+data class AddonPersonalityDefinition(
     val id: String,
     val name: String,
     val description: String,
